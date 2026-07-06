@@ -284,6 +284,7 @@ function App() {
             <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
             <h1>{formatDisplayDate(selectedDate)}</h1>
           </div>
+          <span className="log-count">{logs.length}件</span>
         </header>
 
         <section className="log-list" aria-live="polite">
@@ -343,7 +344,7 @@ function App() {
           </button>
           <textarea
             aria-label="メモ"
-            placeholder="感覚を短く書く"
+            placeholder="例: 外角を逆方向へ押せた"
             rows={1}
             value={text}
             onChange={(event) => setText(event.target.value)}
