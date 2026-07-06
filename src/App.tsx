@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { db } from "./db";
 import { formatDisplayDate, formatTime, toDateKey } from "./date";
-import type { LogEntry, LogImage } from "./types";
+import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
+const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調"];
 
 type BackupImage = Omit<LogImage, "blob"> & {
   dataUrl: string;
@@ -12,6 +13,9 @@ type BackupImage = Omit<LogImage, "blob"> & {
 type BackupLogEntry = Omit<LogEntry, "images"> & {
   images: BackupImage[];
 };
+
+type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
+  Partial<Pick<LogEntry, "images" | "tags">>;
 
 function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -25,6 +29,14 @@ function readFileAsDataUrl(file: Blob): Promise<string> {
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const response = await fetch(dataUrl);
   return response.blob();
+}
+
+function normalizeLog(log: StoredLogEntry): LogEntry {
+  return {
+    ...log,
+    tags: log.tags ?? [],
+    images: log.images ?? [],
+  };
 }
 
 function ImagePreview({ image }: { image: LogImage }) {
@@ -52,6 +64,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [text, setText] = useState("");
+  const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
   const [pendingImage, setPendingImage] = useState<LogImage | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -79,7 +92,7 @@ function App() {
         .sortBy("createdAt");
 
       if (isActive) {
-        setLogs(entries);
+        setLogs(entries.map(normalizeLog));
         setIsLoading(false);
       }
     }
@@ -124,12 +137,14 @@ function App() {
       date: selectedDate,
       createdAt: now.toISOString(),
       text: trimmedText,
+      tags: selectedTags,
       images: pendingImage ? [pendingImage] : [],
     };
 
     await db.logs.add(entry);
     setLogs((currentLogs) => [...currentLogs, entry]);
     setText("");
+    setSelectedTags([]);
     setPendingImage(null);
     if (imageInputRef.current) {
       imageInputRef.current.value = "";
@@ -159,6 +174,14 @@ function App() {
     }
   }
 
+  function toggleTag(tag: LogTag) {
+    setSelectedTags((currentTags) =>
+      currentTags.includes(tag)
+        ? currentTags.filter((currentTag) => currentTag !== tag)
+        : [...currentTags, tag],
+    );
+  }
+
   async function handleDeleteLog(logId: string) {
     const shouldDelete = window.confirm("このメモを削除しますか？");
 
@@ -173,18 +196,22 @@ function App() {
   async function handleExportBackup() {
     const allLogs = await db.logs.orderBy("createdAt").toArray();
     const backupLogs: BackupLogEntry[] = await Promise.all(
-      allLogs.map(async (log) => ({
-        ...log,
-        images: await Promise.all(
-          log.images.map(async (image) => ({
-            id: image.id,
-            name: image.name,
-            type: image.type,
-            createdAt: image.createdAt,
-            dataUrl: await readFileAsDataUrl(image.blob),
-          })),
-        ),
-      })),
+      allLogs.map(async (log) => {
+        const normalizedLog = normalizeLog(log);
+
+        return {
+          ...normalizedLog,
+          images: await Promise.all(
+            normalizedLog.images.map(async (image) => ({
+              id: image.id,
+              name: image.name,
+              type: image.type,
+              createdAt: image.createdAt,
+              dataUrl: await readFileAsDataUrl(image.blob),
+            })),
+          ),
+        };
+      }),
     );
 
     const blob = new Blob([JSON.stringify({ version: 1, logs: backupLogs }, null, 2)], {
@@ -215,6 +242,7 @@ function App() {
           date: log.date,
           createdAt: log.createdAt,
           text: log.text,
+          tags: log.tags ?? [],
           images: await Promise.all(
             (log.images ?? []).slice(0, 1).map(async (image) => ({
               id: image.id,
@@ -229,7 +257,7 @@ function App() {
 
       await db.logs.bulkPut(restoredLogs);
       const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
-      setLogs(entries);
+      setLogs(entries.map(normalizeLog));
       setBackupMessage(`${restoredLogs.length}件を読み込みました。`);
     } catch {
       setBackupMessage("バックアップを読み込めませんでした。");
@@ -347,6 +375,15 @@ function App() {
                 <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
                 <div className="log-content">
                   <div className="log-body">
+                    {log.tags.length > 0 ? (
+                      <div className="tag-list" aria-label="タグ">
+                        {log.tags.map((tag) => (
+                          <span className="tag-chip" key={tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                     {log.text ? <p>{log.text}</p> : null}
                     {log.images.map((image) => (
                       <ImagePreview image={image} key={image.id} />
@@ -367,6 +404,23 @@ function App() {
         </section>
 
         <form className="composer" onSubmit={handleSubmit}>
+          <div className="tag-picker" aria-label="タグを選択">
+            {logTags.map((tag) => {
+              const isSelected = selectedTags.includes(tag);
+
+              return (
+                <button
+                  className={isSelected ? "tag-toggle selected" : "tag-toggle"}
+                  type="button"
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  aria-pressed={isSelected}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
           {pendingImage ? (
             <div className="attachment-preview">
               {pendingImageUrl ? <img alt={pendingImage.name} src={pendingImageUrl} /> : null}

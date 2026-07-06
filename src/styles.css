@@ -260,6 +260,23 @@ h1 {
   min-width: 0;
 }
 
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  border: 1px solid #d9ded0;
+  border-radius: 999px;
+  background: #f4f7ef;
+  color: #415035;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 5px 8px;
+}
+
 .log-body p {
   margin: 0;
   color: #252520;
@@ -303,6 +320,36 @@ h1 {
   border-top: 1px solid #e8e7e2;
   padding: 16px clamp(20px, 5vw, 64px) calc(20px + env(safe-area-inset-bottom));
   background: rgba(251, 251, 250, 0.92);
+}
+
+.tag-picker {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 680px;
+}
+
+.tag-toggle {
+  min-width: 58px;
+  min-height: 36px;
+  border: 1px solid #d8d6ce;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #3f3e38;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 7px 12px;
+}
+
+.tag-toggle:hover {
+  background: #f0eee8;
+}
+
+.tag-toggle.selected {
+  border-color: #6f7e4e;
+  background: #e9f0dd;
+  color: #2f3b1f;
 }
 
 .attachment-preview {
@@ -359,6 +406,16 @@ h1 {
   border: 0;
   border-radius: 8px;
   font-weight: 650;
+}
+
+.composer .tag-toggle {
+  align-self: auto;
+  height: auto;
+  border: 1px solid #d8d6ce;
+}
+
+.composer .tag-toggle.selected {
+  border-color: #6f7e4e;
 }
 
 .attach-button,
@@ -514,6 +571,17 @@ h1 {
     grid-column: 1 / -1;
     grid-template-columns: 40px minmax(0, 1fr) auto;
     max-width: none;
+  }
+
+  .tag-picker {
+    max-width: none;
+  }
+
+  .tag-toggle {
+    min-width: 54px;
+    min-height: 38px;
+    padding-right: 11px;
+    padding-left: 11px;
   }
 
   .attachment-preview img {
