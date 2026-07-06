@@ -56,12 +56,17 @@ function App() {
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [backupMessage, setBackupMessage] = useState("");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const isToday = selectedDate === todayKey;
   const trimmedText = text.trim();
   const canSubmit = Boolean(trimmedText || pendingImage);
+
+  function closeMenu() {
+    setIsMenuOpen(false);
+  }
 
   useEffect(() => {
     let isActive = true;
@@ -235,17 +240,48 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar" aria-label="メニュー">
+      <header className="mobile-header">
+        <button
+          className="menu-button"
+          type="button"
+          onClick={() => setIsMenuOpen(true)}
+          aria-label="メニューを開く"
+          aria-expanded={isMenuOpen}
+          aria-controls="app-menu"
+        >
+          <span />
+          <span />
+          <span />
+        </button>
         <div className="brand">
           <span className="brand-mark">B</span>
           <span>Baseball Note</span>
+        </div>
+      </header>
+
+      {isMenuOpen ? (
+        <button className="menu-backdrop" type="button" onClick={closeMenu} aria-label="メニューを閉じる" />
+      ) : null}
+
+      <aside className={isMenuOpen ? "sidebar menu-open" : "sidebar"} id="app-menu" aria-label="メニュー">
+        <div className="sidebar-top">
+          <div className="brand">
+            <span className="brand-mark">B</span>
+            <span>Baseball Note</span>
+          </div>
+          <button className="menu-close-button" type="button" onClick={closeMenu} aria-label="メニューを閉じる">
+            閉じる
+          </button>
         </div>
 
         <nav className="nav-list">
           <button
             className={isToday ? "nav-item active" : "nav-item"}
             type="button"
-            onClick={() => setSelectedDate(todayKey)}
+            onClick={() => {
+              setSelectedDate(todayKey);
+              closeMenu();
+            }}
           >
             今日
           </button>
@@ -254,16 +290,29 @@ function App() {
             <input
               type="date"
               value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
+              onChange={(event) => {
+                setSelectedDate(event.target.value);
+                closeMenu();
+              }}
             />
           </label>
-          <button className="nav-item" type="button" onClick={handleExportBackup}>
+          <button
+            className="nav-item"
+            type="button"
+            onClick={() => {
+              handleExportBackup();
+              closeMenu();
+            }}
+          >
             バックアップ
           </button>
           <button
             className="nav-item"
             type="button"
-            onClick={() => importInputRef.current?.click()}
+            onClick={() => {
+              importInputRef.current?.click();
+              closeMenu();
+            }}
           >
             読み込み
           </button>
