@@ -68,6 +68,8 @@ function App() {
   const [pendingImage, setPendingImage] = useState<LogImage | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -75,7 +77,7 @@ function App() {
 
   const isToday = selectedDate === todayKey;
   const trimmedText = text.trim();
-  const canSubmit = Boolean(trimmedText || pendingImage);
+  const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -131,6 +133,9 @@ function App() {
       return;
     }
 
+    setIsSaving(true);
+    setSubmitMessage("");
+
     const now = new Date();
     const entry: LogEntry = {
       id: crypto.randomUUID(),
@@ -141,13 +146,19 @@ function App() {
       images: pendingImage ? [pendingImage] : [],
     };
 
-    await db.logs.add(entry);
-    setLogs((currentLogs) => [...currentLogs, entry]);
-    setText("");
-    setSelectedTags([]);
-    setPendingImage(null);
-    if (imageInputRef.current) {
-      imageInputRef.current.value = "";
+    try {
+      await db.logs.add(entry);
+      setLogs((currentLogs) => [...currentLogs, entry]);
+      setText("");
+      setSelectedTags([]);
+      setPendingImage(null);
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
+    } catch {
+      setSubmitMessage("保存できませんでした。画像を小さくするか、もう一度試してください。");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -404,6 +415,7 @@ function App() {
         </section>
 
         <form className="composer" onSubmit={handleSubmit}>
+          {submitMessage ? <p className="composer-message">{submitMessage}</p> : null}
           <div className="tag-picker" aria-label="タグを選択">
             {logTags.map((tag) => {
               const isSelected = selectedTags.includes(tag);
@@ -453,7 +465,7 @@ function App() {
             onChange={(event) => setText(event.target.value)}
           />
           <button className="send-button" type="submit" disabled={!canSubmit}>
-            送信
+            {isSaving ? "保存中" : "送信"}
           </button>
         </form>
       </main>
