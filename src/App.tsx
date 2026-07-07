@@ -5,6 +5,8 @@ import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調"];
+const maxImageSize = 1400;
+const imageQuality = 0.82;
 
 type BackupImage = Omit<LogImage, "blob"> & {
   dataUrl: string;
@@ -29,6 +31,67 @@ function readFileAsDataUrl(file: Blob): Promise<string> {
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   const response = await fetch(dataUrl);
   return response.blob();
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.addEventListener("load", () => resolve(image));
+    image.addEventListener("error", () => reject(new Error("画像を読み込めませんでした。")));
+    image.src = url;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(new Error("画像を変換できませんでした。"));
+      },
+      "image/jpeg",
+      imageQuality,
+    );
+  });
+}
+
+async function prepareImage(file: File): Promise<LogImage> {
+  const url = URL.createObjectURL(file);
+
+  try {
+    const image = await loadImage(url);
+    const largestSide = Math.max(image.naturalWidth, image.naturalHeight);
+    const scale = Math.min(1, maxImageSize / largestSide);
+    const width = Math.max(1, Math.round(image.naturalWidth * scale));
+    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("画像を変換できませんでした。");
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    context.drawImage(image, 0, 0, width, height);
+
+    const blob = await canvasToBlob(canvas);
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+
+    return {
+      id: crypto.randomUUID(),
+      name: `${baseName}.jpg`,
+      type: blob.type,
+      blob,
+      createdAt: new Date().toISOString(),
+    };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function normalizeLog(log: StoredLogEntry): LogEntry {
@@ -162,20 +225,25 @@ function App() {
     }
   }
 
-  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+  async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
 
     if (!file) {
       return;
     }
 
-    setPendingImage({
-      id: crypto.randomUUID(),
-      name: file.name,
-      type: file.type,
-      blob: file,
-      createdAt: new Date().toISOString(),
-    });
+    setSubmitMessage("画像を準備しています。");
+
+    try {
+      setPendingImage(await prepareImage(file));
+      setSubmitMessage("");
+    } catch {
+      setPendingImage(null);
+      setSubmitMessage("画像を読み込めませんでした。別の画像で試してください。");
+      if (imageInputRef.current) {
+        imageInputRef.current.value = "";
+      }
+    }
   }
 
   function clearPendingImage() {
