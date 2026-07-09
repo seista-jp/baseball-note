@@ -10,10 +10,16 @@ export function formatDisplayDate(dateKey: string): string {
   return `${year}/${month}/${day}`;
 }
 
+export function offsetDateKey(dateKey: string, offsetDays: number): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + offsetDays);
+  return toDateKey(date);
+}
+
 export function formatTime(isoString: string): string {
   return new Intl.DateTimeFormat("ja-JP", {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(isoString));
 }
-

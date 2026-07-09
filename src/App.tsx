@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { db } from "./db";
-import { formatDisplayDate, formatTime, toDateKey } from "./date";
+import { formatDisplayDate, formatTime, offsetDateKey, toDateKey } from "./date";
 import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
@@ -224,6 +224,10 @@ function App() {
     setSelectedDate(log.date);
     setHighlightedLogId(log.id);
     showLogView();
+  }
+
+  function moveSelectedDate(offsetDays: number) {
+    setSelectedDate((currentDate) => offsetDateKey(currentDate, offsetDays));
   }
 
   useEffect(() => {
@@ -703,7 +707,25 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
-            <h1>{formatDisplayDate(selectedDate)}</h1>
+            <div className="date-navigator" aria-label="日付移動">
+              <button
+                className="date-nav-button"
+                type="button"
+                onClick={() => moveSelectedDate(-1)}
+                aria-label="前日へ移動"
+              >
+                ＜
+              </button>
+              <h1>{formatDisplayDate(selectedDate)}</h1>
+              <button
+                className="date-nav-button"
+                type="button"
+                onClick={() => moveSelectedDate(1)}
+                aria-label="翌日へ移動"
+              >
+                ＞
+              </button>
+            </div>
           </div>
           <span className="log-count">
             {hasFilter && baseLogCount > 0 ? `${displayedLogCount}/${baseLogCount}件` : `${baseLogCount}件`}

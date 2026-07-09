@@ -240,6 +240,31 @@ h1 {
   letter-spacing: 0;
 }
 
+.date-navigator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-nav-button {
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #d8d6ce;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #33322d;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  touch-action: manipulation;
+}
+
+.date-nav-button:hover {
+  background: #f0eee8;
+}
+
 .log-count {
   flex: 0 0 auto;
   border: 1px solid #dfddd5;
@@ -801,6 +826,11 @@ h1 {
 
   .topbar {
     padding: 16px;
+  }
+
+  .date-nav-button {
+    width: 40px;
+    height: 40px;
   }
 
   .search-header {
