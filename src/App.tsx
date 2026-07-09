@@ -154,7 +154,7 @@ function App() {
     }
 
     return logs.filter((log) =>
-      selectedFilterTags.every((selectedFilterTag) => log.tags.includes(selectedFilterTag)),
+      selectedFilterTags.some((selectedFilterTag) => log.tags.includes(selectedFilterTag)),
     );
   }, [hasFilter, logs, selectedFilterTags]);
 
