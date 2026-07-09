@@ -128,6 +128,7 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [text, setText] = useState("");
   const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
+  const [selectedFilterTags, setSelectedFilterTags] = useState<LogTag[]>([]);
   const [pendingImage, setPendingImage] = useState<LogImage | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
@@ -146,6 +147,16 @@ function App() {
   const isToday = selectedDate === todayKey;
   const trimmedText = text.trim();
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
+  const hasFilter = selectedFilterTags.length > 0;
+  const filteredLogs = useMemo(() => {
+    if (!hasFilter) {
+      return logs;
+    }
+
+    return logs.filter((log) =>
+      selectedFilterTags.every((selectedFilterTag) => log.tags.includes(selectedFilterTag)),
+    );
+  }, [hasFilter, logs, selectedFilterTags]);
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -260,6 +271,14 @@ function App() {
 
   function toggleTag(tag: LogTag) {
     setSelectedTags((currentTags) =>
+      currentTags.includes(tag)
+        ? currentTags.filter((currentTag) => currentTag !== tag)
+        : [...currentTags, tag],
+    );
+  }
+
+  function toggleFilterTag(tag: LogTag) {
+    setSelectedFilterTags((currentTags) =>
       currentTags.includes(tag)
         ? currentTags.filter((currentTag) => currentTag !== tag)
         : [...currentTags, tag],
@@ -497,16 +516,46 @@ function App() {
             <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
             <h1>{formatDisplayDate(selectedDate)}</h1>
           </div>
-          <span className="log-count">{logs.length}件</span>
+          <span className="log-count">
+            {hasFilter && logs.length > 0 ? `${filteredLogs.length}/${logs.length}件` : `${logs.length}件`}
+          </span>
         </header>
+
+        <section className="filter-bar" aria-label="タグで絞り込み">
+          <span className="filter-label">タグ絞り込み</span>
+          <div className="filter-tags">
+            {logTags.map((tag) => {
+              const isSelected = selectedFilterTags.includes(tag);
+
+              return (
+                <button
+                  className={isSelected ? "tag-toggle selected" : "tag-toggle"}
+                  type="button"
+                  key={tag}
+                  onClick={() => toggleFilterTag(tag)}
+                  aria-pressed={isSelected}
+                >
+                  {tag}
+                </button>
+              );
+            })}
+          </div>
+          {hasFilter ? (
+            <button className="filter-clear-button" type="button" onClick={() => setSelectedFilterTags([])}>
+              解除
+            </button>
+          ) : null}
+        </section>
 
         <section className="log-list" aria-live="polite">
           {isLoading ? (
             <div className="empty-state">読み込み中...</div>
           ) : logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
+          ) : filteredLogs.length === 0 ? (
+            <div className="empty-state">選んだタグのメモはありません。</div>
           ) : (
-            logs.map((log) => {
+            filteredLogs.map((log) => {
               const isEditing = editingLogId === log.id;
               const isSavingEdit = savingEditLogId === log.id;
               const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
