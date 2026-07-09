@@ -4,7 +4,7 @@ import { formatDisplayDate, formatTime, toDateKey } from "./date";
 import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
-const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調"];
+const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
 const maxImageSize = 1400;
 const imageQuality = 0.82;
 

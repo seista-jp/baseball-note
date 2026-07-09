@@ -6,7 +6,7 @@ export type LogImage = {
   createdAt: string;
 };
 
-export type LogTag = "打撃" | "守備" | "走塁" | "投球" | "体調";
+export type LogTag = "打撃" | "守備" | "走塁" | "投球" | "体調" | "フィジカル";
 
 export type LogEntry = {
   id: string;

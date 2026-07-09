@@ -812,12 +812,28 @@ h1 {
   }
 
   .filter-bar {
-    align-items: flex-start;
-    padding: 12px 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 12px;
   }
 
   .filter-label {
-    padding-top: 9px;
+    font-size: 0;
+    padding-top: 0;
+  }
+
+  .filter-label::after {
+    content: "タグ";
+    font-size: 13px;
+  }
+
+  .filter-tags {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
   }
 
   h1 {
@@ -871,14 +887,21 @@ h1 {
   }
 
   .tag-picker {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
     max-width: none;
   }
 
   .tag-toggle {
-    min-width: 54px;
+    width: 100%;
+    min-width: 0;
     min-height: 38px;
-    padding-right: 11px;
-    padding-left: 11px;
+    font-size: 10px;
+    line-height: 1;
+    padding-right: 4px;
+    padding-left: 4px;
+    white-space: nowrap;
   }
 
   .filter-clear-button {
