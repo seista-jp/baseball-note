@@ -132,6 +132,28 @@ button:disabled {
   touch-action: manipulation;
 }
 
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.nav-icon {
+  display: inline-grid;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #6a6960;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1;
+}
+
+.nav-item.active .nav-icon {
+  color: #33322d;
+}
+
 .nav-item:hover:not(:disabled),
 .date-picker:hover {
   background: #e7e5de;
@@ -162,7 +184,13 @@ button:disabled {
   gap: 8px;
 }
 
-.date-picker span {
+.date-picker-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.date-picker-label span:last-child {
   color: #5f5e57;
   font-size: 13px;
 }

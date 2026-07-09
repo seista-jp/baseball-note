@@ -580,10 +580,18 @@ function App() {
               closeMenu();
             }}
           >
-            今日
+            <span className="nav-icon" aria-hidden="true">
+              ○
+            </span>
+            <span>今日</span>
           </button>
           <label className="date-picker">
-            <span>日付</span>
+            <span className="date-picker-label">
+              <span className="nav-icon" aria-hidden="true">
+                □
+              </span>
+              <span>日付</span>
+            </span>
             <input
               type="date"
               value={selectedDate}
@@ -599,7 +607,10 @@ function App() {
             type="button"
             onClick={showSearchView}
           >
-            検索
+            <span className="nav-icon" aria-hidden="true">
+              ⌕
+            </span>
+            <span>検索</span>
           </button>
           <button
             className="nav-item"
@@ -609,7 +620,10 @@ function App() {
               closeMenu();
             }}
           >
-            バックアップ
+            <span className="nav-icon" aria-hidden="true">
+              ↓
+            </span>
+            <span>バックアップ</span>
           </button>
           <button
             className="nav-item"
@@ -619,7 +633,10 @@ function App() {
               closeMenu();
             }}
           >
-            読み込み
+            <span className="nav-icon" aria-hidden="true">
+              ↑
+            </span>
+            <span>読み込み</span>
           </button>
           <input
             ref={importInputRef}
