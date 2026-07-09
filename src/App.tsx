@@ -102,6 +102,23 @@ function normalizeLog(log: StoredLogEntry): LogEntry {
   };
 }
 
+function formatSearchDateLabel(dateKey: string): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = toDateKey(yesterday);
+
+  if (dateKey === todayKey) {
+    return "今日";
+  }
+
+  if (dateKey === yesterdayKey) {
+    return "昨日";
+  }
+
+  const [, month, day] = dateKey.split("-");
+  return `${Number(month)}/${Number(day)}`;
+}
+
 function ImagePreview({ image }: { image: LogImage }) {
   const [url, setUrl] = useState("");
 
@@ -138,6 +155,8 @@ function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [viewMode, setViewMode] = useState<"logs" | "search">("logs");
+  const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [editingTags, setEditingTags] = useState<LogTag[]>([]);
@@ -151,12 +170,13 @@ function App() {
   const trimmedText = text.trim();
   const trimmedSearchQuery = searchQuery.trim();
   const normalizedSearchQuery = trimmedSearchQuery.toLowerCase();
-  const isSearchMode = trimmedSearchQuery.length > 0;
+  const isSearchView = viewMode === "search";
+  const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
-  const searchedLogs = useMemo(() => {
-    if (!isSearchMode) {
-      return [];
+  const searchResults = useMemo(() => {
+    if (!hasSearchQuery) {
+      return searchLogs.slice(0, 20);
     }
 
     return searchLogs.filter((log) => {
@@ -171,8 +191,8 @@ function App() {
 
       return searchableText.includes(normalizedSearchQuery);
     });
-  }, [isSearchMode, normalizedSearchQuery, searchLogs]);
-  const baseLogs = isSearchMode ? searchedLogs : logs;
+  }, [hasSearchQuery, normalizedSearchQuery, searchLogs]);
+  const baseLogs = logs;
   const filteredLogs = useMemo(() => {
     if (!hasFilter) {
       return baseLogs;
@@ -184,10 +204,26 @@ function App() {
   }, [baseLogs, hasFilter, selectedFilterTags]);
   const displayedLogCount = filteredLogs.length;
   const baseLogCount = baseLogs.length;
-  const isListLoading = isSearchMode ? isSearchLoading : isLoading;
 
   function closeMenu() {
     setIsMenuOpen(false);
+  }
+
+  function showLogView() {
+    setViewMode("logs");
+    setSearchQuery("");
+  }
+
+  function showSearchView() {
+    setViewMode("search");
+    setSearchQuery("");
+    closeMenu();
+  }
+
+  function openSearchResult(log: LogEntry) {
+    setSelectedDate(log.date);
+    setHighlightedLogId(log.id);
+    showLogView();
   }
 
   useEffect(() => {
@@ -217,7 +253,7 @@ function App() {
     let isActive = true;
 
     async function loadSearchLogs() {
-      if (!isSearchMode) {
+      if (!isSearchView) {
         setSearchLogs([]);
         setIsSearchLoading(false);
         return;
@@ -237,7 +273,22 @@ function App() {
     return () => {
       isActive = false;
     };
-  }, [isSearchMode]);
+  }, [isSearchView]);
+
+  useEffect(() => {
+    if (!highlightedLogId || isLoading || isSearchView) {
+      return;
+    }
+
+    const highlightedElement = document.querySelector(`[data-log-id="${highlightedLogId}"]`);
+    highlightedElement?.scrollIntoView({ block: "center" });
+
+    const timeoutId = window.setTimeout(() => {
+      setHighlightedLogId(null);
+    }, 2400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [highlightedLogId, isLoading, isSearchView, logs]);
 
   useEffect(() => {
     if (!pendingImage) {
@@ -471,7 +522,7 @@ function App() {
       await db.logs.bulkPut(restoredLogs);
       const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
       setLogs(entries.map(normalizeLog));
-      if (isSearchMode) {
+      if (isSearchView) {
         const allEntries = await db.logs.orderBy("createdAt").toArray();
         setSearchLogs(allEntries.map(normalizeLog).reverse());
       }
@@ -521,11 +572,11 @@ function App() {
 
         <nav className="nav-list">
           <button
-            className={!isSearchMode && isToday ? "nav-item active" : "nav-item"}
+            className={!isSearchView && isToday ? "nav-item active" : "nav-item"}
             type="button"
             onClick={() => {
               setSelectedDate(todayKey);
-              setSearchQuery("");
+              showLogView();
               closeMenu();
             }}
           >
@@ -538,20 +589,18 @@ function App() {
               value={selectedDate}
               onChange={(event) => {
                 setSelectedDate(event.target.value);
-                setSearchQuery("");
+                showLogView();
                 closeMenu();
               }}
             />
           </label>
-          <label className="search-box">
-            <span>検索</span>
-            <input
-              type="search"
-              value={searchQuery}
-              placeholder="メモを検索"
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-          </label>
+          <button
+            className={isSearchView ? "nav-item active" : "nav-item"}
+            type="button"
+            onClick={showSearchView}
+          >
+            検索
+          </button>
           <button
             className="nav-item"
             type="button"
@@ -583,11 +632,61 @@ function App() {
         {backupMessage ? <p className="sidebar-note">{backupMessage}</p> : null}
       </aside>
 
-      <main className="main-pane">
+      <main className={isSearchView ? "main-pane search-pane" : "main-pane"}>
+        {isSearchView ? (
+          <section className="search-screen" aria-label="メモを検索">
+            <div className="search-header">
+              <label className="search-field">
+                <span>検索</span>
+                <input
+                  type="search"
+                  value={searchQuery}
+                  placeholder="メモを検索"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  autoFocus
+                />
+              </label>
+              <button className="search-close-button" type="button" onClick={showLogView} aria-label="検索を閉じる">
+                閉じる
+              </button>
+            </div>
+
+            <div className="search-result-list" aria-live="polite">
+              {isSearchLoading ? (
+                <div className="empty-state">読み込み中...</div>
+              ) : searchResults.length === 0 ? (
+                <div className="empty-state">
+                  {hasSearchQuery ? "検索に一致するメモはありません。" : "メモはまだありません。"}
+                </div>
+              ) : (
+                <>
+                  <p className="search-section-title">{hasSearchQuery ? "検索結果" : "最近"}</p>
+                  {searchResults.map((log) => (
+                    <button
+                      className="search-result-item"
+                      type="button"
+                      key={log.id}
+                      onClick={() => openSearchResult(log)}
+                    >
+                      <span className="search-result-main">
+                        <span className="search-result-title">{log.text || "画像メモ"}</span>
+                        {log.tags.length > 0 ? (
+                          <span className="search-result-tags">{log.tags.join(" / ")}</span>
+                        ) : null}
+                      </span>
+                      <span className="search-result-date">{formatSearchDateLabel(log.date)}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </section>
+        ) : (
+          <>
         <header className="topbar">
           <div>
-            <p className="eyebrow">{isSearchMode ? "検索" : isToday ? "今日のログ" : "過去のログ"}</p>
-            <h1>{isSearchMode ? "検索結果" : formatDisplayDate(selectedDate)}</h1>
+            <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
+            <h1>{formatDisplayDate(selectedDate)}</h1>
           </div>
           <span className="log-count">
             {hasFilter && baseLogCount > 0 ? `${displayedLogCount}/${baseLogCount}件` : `${baseLogCount}件`}
@@ -621,16 +720,12 @@ function App() {
         </section>
 
         <section className="log-list" aria-live="polite">
-          {isListLoading ? (
+          {isLoading ? (
             <div className="empty-state">読み込み中...</div>
-          ) : isSearchMode && searchedLogs.length === 0 ? (
-            <div className="empty-state">検索に一致するメモはありません。</div>
-          ) : !isSearchMode && logs.length === 0 ? (
+          ) : logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
           ) : filteredLogs.length === 0 ? (
-            <div className="empty-state">
-              {isSearchMode ? "選んだタグに一致する検索結果はありません。" : "選んだタグのメモはありません。"}
-            </div>
+            <div className="empty-state">選んだタグのメモはありません。</div>
           ) : (
             filteredLogs.map((log) => {
               const isEditing = editingLogId === log.id;
@@ -638,11 +733,12 @@ function App() {
               const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
 
               return (
-                <article className={isSearchMode ? "log-entry search-result" : "log-entry"} key={log.id}>
-                  <time dateTime={log.createdAt}>
-                    {isSearchMode ? <span>{formatDisplayDate(log.date)}</span> : null}
-                    <span>{formatTime(log.createdAt)}</span>
-                  </time>
+                <article
+                  className={highlightedLogId === log.id ? "log-entry highlighted" : "log-entry"}
+                  data-log-id={log.id}
+                  key={log.id}
+                >
+                  <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
                   <div className="log-content">
                     {isEditing ? (
                       <div className="edit-panel">
@@ -791,6 +887,8 @@ function App() {
             {isSaving ? "保存中" : "送信"}
           </button>
         </form>
+          </>
+        )}
       </main>
     </div>
   );

@@ -121,8 +121,7 @@ button:disabled {
 }
 
 .nav-item,
-.date-picker,
-.search-box {
+.date-picker {
   width: 100%;
   border: 0;
   border-radius: 8px;
@@ -134,8 +133,7 @@ button:disabled {
 }
 
 .nav-item:hover:not(:disabled),
-.date-picker:hover,
-.search-box:hover {
+.date-picker:hover {
   background: #e7e5de;
 }
 
@@ -159,20 +157,17 @@ button:disabled {
   display: none;
 }
 
-.date-picker,
-.search-box {
+.date-picker {
   display: grid;
   gap: 8px;
 }
 
-.date-picker span,
-.search-box span {
+.date-picker span {
   color: #5f5e57;
   font-size: 13px;
 }
 
-.date-picker input,
-.search-box input {
+.date-picker input {
   width: 100%;
   min-width: 136px;
   border: 1px solid #d8d6ce;
@@ -182,16 +177,16 @@ button:disabled {
   padding: 8px;
 }
 
-.search-box input {
-  min-width: 0;
-}
-
 .main-pane {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   max-height: 100vh;
   background: #fbfbfa;
+}
+
+.search-pane {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .topbar {
@@ -268,6 +263,126 @@ h1 {
   background: #f2f2ee;
 }
 
+.search-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.search-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  border-bottom: 1px solid #e8e7e2;
+  padding: 22px clamp(20px, 5vw, 64px);
+}
+
+.search-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.search-field span {
+  color: #6f6e66;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.search-field input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid #d8d6ce;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #242420;
+  padding: 11px 13px;
+}
+
+.search-field input:focus {
+  border-color: #8b8a82;
+  outline: 2px solid #eceae3;
+}
+
+.search-close-button {
+  min-height: 46px;
+  border: 1px solid #d8d6ce;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #33322d;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 10px 12px;
+}
+
+.search-close-button:hover {
+  background: #f0eee8;
+}
+
+.search-result-list {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  overflow-y: auto;
+  padding: 18px clamp(20px, 5vw, 64px) 32px;
+}
+
+.search-section-title {
+  margin: 0 0 10px;
+  color: #77756d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.search-result-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  width: min(100%, 760px);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #252520;
+  padding: 11px 12px;
+  text-align: left;
+}
+
+.search-result-item:hover {
+  background: #f0eee8;
+}
+
+.search-result-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.search-result-title {
+  overflow: hidden;
+  font-weight: 650;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-tags {
+  overflow: hidden;
+  color: #77756d;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-result-date {
+  color: #77756d;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .log-list {
   display: flex;
   flex-direction: column;
@@ -290,14 +405,15 @@ h1 {
 }
 
 .log-entry time {
-  display: grid;
   color: #77756d;
   font-size: 13px;
   line-height: 1.7;
 }
 
-.log-entry.search-result {
-  grid-template-columns: 96px minmax(0, 680px);
+.log-entry.highlighted .log-body {
+  border-radius: 8px;
+  background: #eef4e4;
+  box-shadow: 0 0 0 8px #eef4e4;
 }
 
 .log-content {
@@ -527,8 +643,7 @@ h1 {
 }
 
 .composer textarea:focus,
-.date-picker input:focus,
-.search-box input:focus {
+.date-picker input:focus {
   border-color: #8b8a82;
   outline: 2px solid #eceae3;
 }
@@ -640,15 +755,13 @@ h1 {
   }
 
   .nav-item,
-  .date-picker,
-  .search-box {
+  .date-picker {
     width: 100%;
     min-height: 48px;
     white-space: normal;
   }
 
-  .date-picker,
-  .search-box {
+  .date-picker {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
@@ -660,6 +773,14 @@ h1 {
 
   .topbar {
     padding: 16px;
+  }
+
+  .search-header {
+    padding: 14px 16px;
+  }
+
+  .search-result-list {
+    padding: 18px 16px 32px;
   }
 
   .filter-bar {
@@ -683,10 +804,6 @@ h1 {
   .log-entry {
     grid-template-columns: 44px minmax(0, 1fr);
     gap: 10px;
-  }
-
-  .log-entry.search-result {
-    grid-template-columns: 74px minmax(0, 1fr);
   }
 
   .log-content {
