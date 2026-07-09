@@ -134,6 +134,11 @@ function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const [editingTags, setEditingTags] = useState<LogTag[]>([]);
+  const [editingMessage, setEditingMessage] = useState("");
+  const [savingEditLogId, setSavingEditLogId] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -259,6 +264,58 @@ function App() {
         ? currentTags.filter((currentTag) => currentTag !== tag)
         : [...currentTags, tag],
     );
+  }
+
+  function startEditingLog(log: LogEntry) {
+    setEditingLogId(log.id);
+    setEditingText(log.text);
+    setEditingTags(log.tags);
+    setEditingMessage("");
+  }
+
+  function cancelEditingLog() {
+    setEditingLogId(null);
+    setEditingText("");
+    setEditingTags([]);
+    setEditingMessage("");
+  }
+
+  function toggleEditingTag(tag: LogTag) {
+    setEditingTags((currentTags) =>
+      currentTags.includes(tag)
+        ? currentTags.filter((currentTag) => currentTag !== tag)
+        : [...currentTags, tag],
+    );
+  }
+
+  async function handleUpdateLog(log: LogEntry) {
+    const nextText = editingText.trim();
+
+    if (!nextText && log.images.length === 0) {
+      setEditingMessage("本文が空のメモは保存できません。");
+      return;
+    }
+
+    const updatedLog: LogEntry = {
+      ...log,
+      text: nextText,
+      tags: editingTags,
+    };
+
+    setSavingEditLogId(log.id);
+    setEditingMessage("");
+
+    try {
+      await db.logs.put(updatedLog);
+      setLogs((currentLogs) =>
+        currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
+      );
+      cancelEditingLog();
+    } catch {
+      setEditingMessage("更新できませんでした。もう一度試してください。");
+    } finally {
+      setSavingEditLogId(null);
+    }
   }
 
   async function handleDeleteLog(logId: string) {
@@ -449,36 +506,105 @@ function App() {
           ) : logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
           ) : (
-            logs.map((log) => (
-              <article className="log-entry" key={log.id}>
-                <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
-                <div className="log-content">
-                  <div className="log-body">
-                    {log.tags.length > 0 ? (
-                      <div className="tag-list" aria-label="タグ">
-                        {log.tags.map((tag) => (
-                          <span className="tag-chip" key={tag}>
-                            {tag}
-                          </span>
+            logs.map((log) => {
+              const isEditing = editingLogId === log.id;
+              const isSavingEdit = savingEditLogId === log.id;
+              const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
+
+              return (
+                <article className="log-entry" key={log.id}>
+                  <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
+                  <div className="log-content">
+                    {isEditing ? (
+                      <div className="edit-panel">
+                        {editingMessage ? <p className="edit-message">{editingMessage}</p> : null}
+                        <div className="tag-list edit-tag-list" aria-label="タグを編集">
+                          {logTags.map((tag) => {
+                            const isSelected = editingTags.includes(tag);
+
+                            return (
+                              <button
+                                className={isSelected ? "tag-toggle selected" : "tag-toggle"}
+                                type="button"
+                                key={tag}
+                                onClick={() => toggleEditingTag(tag)}
+                                aria-pressed={isSelected}
+                              >
+                                {tag}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <textarea
+                          className="edit-textarea"
+                          aria-label={`${formatTime(log.createdAt)}のメモを編集`}
+                          rows={3}
+                          value={editingText}
+                          onChange={(event) => setEditingText(event.target.value)}
+                        />
+                        {log.images.map((image) => (
+                          <ImagePreview image={image} key={image.id} />
                         ))}
+                        <div className="edit-actions">
+                          <button
+                            className="log-action-button"
+                            type="button"
+                            onClick={cancelEditingLog}
+                            disabled={isSavingEdit}
+                          >
+                            キャンセル
+                          </button>
+                          <button
+                            className="log-action-button primary"
+                            type="button"
+                            onClick={() => handleUpdateLog(log)}
+                            disabled={!canSaveEdit}
+                          >
+                            {isSavingEdit ? "保存中" : "保存"}
+                          </button>
+                        </div>
                       </div>
-                    ) : null}
-                    {log.text ? <p>{log.text}</p> : null}
-                    {log.images.map((image) => (
-                      <ImagePreview image={image} key={image.id} />
-                    ))}
+                    ) : (
+                      <>
+                        <div className="log-body">
+                          {log.tags.length > 0 ? (
+                            <div className="tag-list" aria-label="タグ">
+                              {log.tags.map((tag) => (
+                                <span className="tag-chip" key={tag}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {log.text ? <p>{log.text}</p> : null}
+                          {log.images.map((image) => (
+                            <ImagePreview image={image} key={image.id} />
+                          ))}
+                        </div>
+                        <div className="log-actions">
+                          <button
+                            className="log-action-button"
+                            type="button"
+                            onClick={() => startEditingLog(log)}
+                            aria-label={`${formatTime(log.createdAt)}のメモを編集`}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="log-action-button danger"
+                            type="button"
+                            onClick={() => handleDeleteLog(log.id)}
+                            aria-label={`${formatTime(log.createdAt)}のメモを削除`}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <button
-                    className="delete-log-button"
-                    type="button"
-                    onClick={() => handleDeleteLog(log.id)}
-                    aria-label={`${formatTime(log.createdAt)}のメモを削除`}
-                  >
-                    削除
-                  </button>
-                </div>
-              </article>
-            ))
+                </article>
+              );
+            })
           )}
         </section>
 

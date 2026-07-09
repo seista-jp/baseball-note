@@ -298,19 +298,90 @@ h1 {
   object-fit: contain;
 }
 
-.delete-log-button {
+.log-actions {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+}
+
+.log-action-button {
   min-width: 56px;
   border: 1px solid #d8d6ce;
   border-radius: 8px;
   background: #ffffff;
-  color: #5d2d2d;
+  color: #34342e;
   font-size: 13px;
   font-weight: 650;
   padding: 7px 10px;
 }
 
-.delete-log-button:hover {
+.log-action-button:hover {
+  background: #f2f2ee;
+}
+
+.log-action-button.primary {
+  border-color: #2f6f44;
+  background: #2f6f44;
+  color: #ffffff;
+}
+
+.log-action-button.primary:hover {
+  background: #285f3b;
+}
+
+.log-action-button.danger {
+  color: #5d2d2d;
+}
+
+.log-action-button.danger:hover {
   background: #f4e9e7;
+}
+
+.log-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.edit-panel {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  min-width: 0;
+}
+
+.edit-message {
+  margin: 0;
+  color: #7a2d2d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.edit-tag-list {
+  gap: 8px;
+}
+
+.edit-textarea {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  border: 1px solid #d8d6ce;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #252520;
+  font: inherit;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+
+.edit-textarea:focus {
+  border-color: #2f6f44;
+  outline: 2px solid rgba(47, 111, 68, 0.16);
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .composer {
@@ -559,8 +630,11 @@ h1 {
     max-height: 360px;
   }
 
-  .delete-log-button {
+  .log-actions {
     justify-self: end;
+  }
+
+  .log-action-button {
     width: auto;
     min-height: 40px;
   }
