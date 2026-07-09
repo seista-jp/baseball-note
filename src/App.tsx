@@ -126,12 +126,15 @@ function ImagePreview({ image }: { image: LogImage }) {
 function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
   const [text, setText] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
   const [selectedFilterTags, setSelectedFilterTags] = useState<LogTag[]>([]);
   const [pendingImage, setPendingImage] = useState<LogImage | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -146,17 +149,42 @@ function App() {
 
   const isToday = selectedDate === todayKey;
   const trimmedText = text.trim();
+  const trimmedSearchQuery = searchQuery.trim();
+  const normalizedSearchQuery = trimmedSearchQuery.toLowerCase();
+  const isSearchMode = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
-  const filteredLogs = useMemo(() => {
-    if (!hasFilter) {
-      return logs;
+  const searchedLogs = useMemo(() => {
+    if (!isSearchMode) {
+      return [];
     }
 
-    return logs.filter((log) =>
+    return searchLogs.filter((log) => {
+      const searchableText = [
+        log.text,
+        ...log.tags,
+        log.date,
+        formatDisplayDate(log.date),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(normalizedSearchQuery);
+    });
+  }, [isSearchMode, normalizedSearchQuery, searchLogs]);
+  const baseLogs = isSearchMode ? searchedLogs : logs;
+  const filteredLogs = useMemo(() => {
+    if (!hasFilter) {
+      return baseLogs;
+    }
+
+    return baseLogs.filter((log) =>
       selectedFilterTags.some((selectedFilterTag) => log.tags.includes(selectedFilterTag)),
     );
-  }, [hasFilter, logs, selectedFilterTags]);
+  }, [baseLogs, hasFilter, selectedFilterTags]);
+  const displayedLogCount = filteredLogs.length;
+  const baseLogCount = baseLogs.length;
+  const isListLoading = isSearchMode ? isSearchLoading : isLoading;
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -184,6 +212,32 @@ function App() {
       isActive = false;
     };
   }, [selectedDate]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadSearchLogs() {
+      if (!isSearchMode) {
+        setSearchLogs([]);
+        setIsSearchLoading(false);
+        return;
+      }
+
+      setIsSearchLoading(true);
+      const entries = await db.logs.orderBy("createdAt").toArray();
+
+      if (isActive) {
+        setSearchLogs(entries.map(normalizeLog).reverse());
+        setIsSearchLoading(false);
+      }
+    }
+
+    loadSearchLogs();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isSearchMode]);
 
   useEffect(() => {
     if (!pendingImage) {
@@ -329,6 +383,9 @@ function App() {
       setLogs((currentLogs) =>
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
+      setSearchLogs((currentLogs) =>
+        currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
+      );
       cancelEditingLog();
     } catch {
       setEditingMessage("更新できませんでした。もう一度試してください。");
@@ -346,6 +403,7 @@ function App() {
 
     await db.logs.delete(logId);
     setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+    setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
   }
 
   async function handleExportBackup() {
@@ -413,6 +471,10 @@ function App() {
       await db.logs.bulkPut(restoredLogs);
       const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
       setLogs(entries.map(normalizeLog));
+      if (isSearchMode) {
+        const allEntries = await db.logs.orderBy("createdAt").toArray();
+        setSearchLogs(allEntries.map(normalizeLog).reverse());
+      }
       setBackupMessage(`${restoredLogs.length}件を読み込みました。`);
     } catch {
       setBackupMessage("バックアップを読み込めませんでした。");
@@ -459,10 +521,11 @@ function App() {
 
         <nav className="nav-list">
           <button
-            className={isToday ? "nav-item active" : "nav-item"}
+            className={!isSearchMode && isToday ? "nav-item active" : "nav-item"}
             type="button"
             onClick={() => {
               setSelectedDate(todayKey);
+              setSearchQuery("");
               closeMenu();
             }}
           >
@@ -475,8 +538,18 @@ function App() {
               value={selectedDate}
               onChange={(event) => {
                 setSelectedDate(event.target.value);
+                setSearchQuery("");
                 closeMenu();
               }}
+            />
+          </label>
+          <label className="search-box">
+            <span>検索</span>
+            <input
+              type="search"
+              value={searchQuery}
+              placeholder="メモを検索"
+              onChange={(event) => setSearchQuery(event.target.value)}
             />
           </label>
           <button
@@ -513,11 +586,11 @@ function App() {
       <main className="main-pane">
         <header className="topbar">
           <div>
-            <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
-            <h1>{formatDisplayDate(selectedDate)}</h1>
+            <p className="eyebrow">{isSearchMode ? "検索" : isToday ? "今日のログ" : "過去のログ"}</p>
+            <h1>{isSearchMode ? "検索結果" : formatDisplayDate(selectedDate)}</h1>
           </div>
           <span className="log-count">
-            {hasFilter && logs.length > 0 ? `${filteredLogs.length}/${logs.length}件` : `${logs.length}件`}
+            {hasFilter && baseLogCount > 0 ? `${displayedLogCount}/${baseLogCount}件` : `${baseLogCount}件`}
           </span>
         </header>
 
@@ -548,12 +621,16 @@ function App() {
         </section>
 
         <section className="log-list" aria-live="polite">
-          {isLoading ? (
+          {isListLoading ? (
             <div className="empty-state">読み込み中...</div>
-          ) : logs.length === 0 ? (
+          ) : isSearchMode && searchedLogs.length === 0 ? (
+            <div className="empty-state">検索に一致するメモはありません。</div>
+          ) : !isSearchMode && logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
           ) : filteredLogs.length === 0 ? (
-            <div className="empty-state">選んだタグのメモはありません。</div>
+            <div className="empty-state">
+              {isSearchMode ? "選んだタグに一致する検索結果はありません。" : "選んだタグのメモはありません。"}
+            </div>
           ) : (
             filteredLogs.map((log) => {
               const isEditing = editingLogId === log.id;
@@ -561,8 +638,11 @@ function App() {
               const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
 
               return (
-                <article className="log-entry" key={log.id}>
-                  <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
+                <article className={isSearchMode ? "log-entry search-result" : "log-entry"} key={log.id}>
+                  <time dateTime={log.createdAt}>
+                    {isSearchMode ? <span>{formatDisplayDate(log.date)}</span> : null}
+                    <span>{formatTime(log.createdAt)}</span>
+                  </time>
                   <div className="log-content">
                     {isEditing ? (
                       <div className="edit-panel">

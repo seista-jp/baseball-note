@@ -121,7 +121,8 @@ button:disabled {
 }
 
 .nav-item,
-.date-picker {
+.date-picker,
+.search-box {
   width: 100%;
   border: 0;
   border-radius: 8px;
@@ -133,7 +134,8 @@ button:disabled {
 }
 
 .nav-item:hover:not(:disabled),
-.date-picker:hover {
+.date-picker:hover,
+.search-box:hover {
   background: #e7e5de;
 }
 
@@ -157,17 +159,20 @@ button:disabled {
   display: none;
 }
 
-.date-picker {
+.date-picker,
+.search-box {
   display: grid;
   gap: 8px;
 }
 
-.date-picker span {
+.date-picker span,
+.search-box span {
   color: #5f5e57;
   font-size: 13px;
 }
 
-.date-picker input {
+.date-picker input,
+.search-box input {
   width: 100%;
   min-width: 136px;
   border: 1px solid #d8d6ce;
@@ -177,7 +182,11 @@ button:disabled {
   padding: 8px;
 }
 
-  .main-pane {
+.search-box input {
+  min-width: 0;
+}
+
+.main-pane {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
@@ -281,9 +290,14 @@ h1 {
 }
 
 .log-entry time {
+  display: grid;
   color: #77756d;
   font-size: 13px;
   line-height: 1.7;
+}
+
+.log-entry.search-result {
+  grid-template-columns: 96px minmax(0, 680px);
 }
 
 .log-content {
@@ -513,7 +527,8 @@ h1 {
 }
 
 .composer textarea:focus,
-.date-picker input:focus {
+.date-picker input:focus,
+.search-box input:focus {
   border-color: #8b8a82;
   outline: 2px solid #eceae3;
 }
@@ -625,18 +640,20 @@ h1 {
   }
 
   .nav-item,
-  .date-picker {
+  .date-picker,
+  .search-box {
     width: 100%;
     min-height: 48px;
     white-space: normal;
   }
 
-  .date-picker {
+  .date-picker,
+  .search-box {
     grid-template-columns: 1fr;
     align-items: stretch;
   }
 
-.main-pane {
+  .main-pane {
     grid-row: 2;
     max-height: none;
   }
@@ -666,6 +683,10 @@ h1 {
   .log-entry {
     grid-template-columns: 44px minmax(0, 1fr);
     gap: 10px;
+  }
+
+  .log-entry.search-result {
+    grid-template-columns: 74px minmax(0, 1fr);
   }
 
   .log-content {
