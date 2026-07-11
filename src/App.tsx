@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  BackupValidationError,
+  validateBackup,
+  type BackupLogEntry,
+} from "./backup";
 import { db } from "./db";
-import { formatDisplayDate, formatShortDate, formatTime, offsetDateKey, toDateKey } from "./date";
+import {
+  formatDisplayDate,
+  formatShortDate,
+  formatTime,
+  formatWeekDateHeading,
+  formatWeekRange,
+  getWeekStart,
+  offsetDateKey,
+  toDateKey,
+} from "./date";
 import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
+const currentWeekStart = getWeekStart(todayKey);
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
 const maxImageSize = 1400;
 const imageQuality = 0.82;
-
-type BackupImage = Omit<LogImage, "blob"> & {
-  dataUrl: string;
-};
-
-type BackupLogEntry = Omit<LogEntry, "images"> & {
-  images: BackupImage[];
-};
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
@@ -102,6 +109,16 @@ function normalizeLog(log: StoredLogEntry): LogEntry {
   };
 }
 
+function sortLogsByDate(entries: StoredLogEntry[]): LogEntry[] {
+  return entries
+    .map(normalizeLog)
+    .sort((first, second) =>
+      first.date === second.date
+        ? first.createdAt.localeCompare(second.createdAt)
+        : first.date.localeCompare(second.date),
+    );
+}
+
 function formatSearchDateLabel(dateKey: string): string {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -187,6 +204,8 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
+  const [weeklyLogs, setWeeklyLogs] = useState<LogEntry[]>([]);
+  const [weekStart, setWeekStart] = useState(currentWeekStart);
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
@@ -195,10 +214,11 @@ function App() {
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
+  const [isWeeklyLoading, setIsWeeklyLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
-  const [viewMode, setViewMode] = useState<"logs" | "search">("logs");
+  const [viewMode, setViewMode] = useState<"logs" | "search" | "weekly">("logs");
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -213,7 +233,10 @@ function App() {
   const trimmedText = text.trim();
   const trimmedSearchQuery = searchQuery.trim();
   const normalizedSearchQuery = trimmedSearchQuery.toLowerCase();
+  const isLogView = viewMode === "logs";
   const isSearchView = viewMode === "search";
+  const isWeeklyView = viewMode === "weekly";
+  const isCurrentWeek = weekStart === currentWeekStart;
   const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
@@ -244,6 +267,17 @@ function App() {
 
     return hasSearchQuery || hasFilter ? matchingLogs : matchingLogs.slice(0, 20);
   }, [hasFilter, hasSearchQuery, normalizedSearchQuery, searchLogs, selectedFilterTags]);
+  const weeklyGroups = useMemo(() => {
+    const groups = new Map<string, LogEntry[]>();
+
+    for (const log of weeklyLogs) {
+      const dayLogs = groups.get(log.date) ?? [];
+      dayLogs.push(log);
+      groups.set(log.date, dayLogs);
+    }
+
+    return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
+  }, [weeklyLogs]);
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -260,6 +294,12 @@ function App() {
     closeMenu();
   }
 
+  function showWeeklyView() {
+    setWeekStart(currentWeekStart);
+    setViewMode("weekly");
+    closeMenu();
+  }
+
   function openSearchResult(log: LogEntry) {
     setSelectedDate(log.date);
     setHighlightedLogId(log.id);
@@ -268,6 +308,13 @@ function App() {
 
   function moveSelectedDate(offsetDays: number) {
     setSelectedDate((currentDate) => offsetDateKey(currentDate, offsetDays));
+  }
+
+  function moveWeek(offsetDays: number) {
+    setWeekStart((currentStart) => {
+      const nextStart = offsetDateKey(currentStart, offsetDays);
+      return nextStart > currentWeekStart ? currentStart : nextStart;
+    });
   }
 
   useEffect(() => {
@@ -320,7 +367,34 @@ function App() {
   }, [isSearchView]);
 
   useEffect(() => {
-    if (!highlightedLogId || isLoading || isSearchView) {
+    let isActive = true;
+
+    async function loadWeeklyLogs() {
+      if (!isWeeklyView) {
+        setWeeklyLogs([]);
+        setIsWeeklyLoading(false);
+        return;
+      }
+
+      setIsWeeklyLoading(true);
+      const weekEnd = offsetDateKey(weekStart, 6);
+      const entries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
+
+      if (isActive) {
+        setWeeklyLogs(sortLogsByDate(entries));
+        setIsWeeklyLoading(false);
+      }
+    }
+
+    loadWeeklyLogs();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isWeeklyView, weekStart]);
+
+  useEffect(() => {
+    if (!highlightedLogId || isLoading || !isLogView) {
       return;
     }
 
@@ -332,7 +406,7 @@ function App() {
     }, 2400);
 
     return () => window.clearTimeout(timeoutId);
-  }, [highlightedLogId, isLoading, isSearchView, logs]);
+  }, [highlightedLogId, isLoading, isLogView, logs]);
 
   useEffect(() => {
     if (!pendingImage) {
@@ -536,14 +610,35 @@ function App() {
 
   async function handleImportBackup(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
+    let importWasApplied = false;
 
     if (!file) {
       return;
     }
 
     try {
-      const parsed = JSON.parse(await file.text()) as { logs?: BackupLogEntry[] };
-      const backupLogs = Array.isArray(parsed.logs) ? parsed.logs : [];
+      setBackupMessage("バックアップを確認しています。");
+      const parsed: unknown = JSON.parse(await file.text());
+      const { logs: backupLogs } = validateBackup(parsed);
+      const existingLogs = await db.logs.bulkGet(backupLogs.map((log) => log.id));
+      const overwriteCount = existingLogs.filter((log) => log !== undefined).length;
+      const newCount = backupLogs.length - overwriteCount;
+
+      if (backupLogs.length === 0) {
+        setBackupMessage("このバックアップに読み込めるメモはありません。既存データは変更していません。");
+        return;
+      }
+
+      const shouldImport = window.confirm(
+        `${backupLogs.length}件を読み込みます。\n新規: ${newCount}件\n上書き: ${overwriteCount}件\n\n` +
+          "同じIDのメモは上書きされます。読み込みを続けますか？",
+      );
+
+      if (!shouldImport) {
+        setBackupMessage("読み込みを中止しました。既存データは変更していません。");
+        return;
+      }
+
       const restoredLogs: LogEntry[] = await Promise.all(
         backupLogs.map(async (log) => ({
           id: log.id,
@@ -552,7 +647,7 @@ function App() {
           text: log.text,
           tags: log.tags ?? [],
           images: await Promise.all(
-            (log.images ?? []).slice(0, 1).map(async (image) => ({
+            log.images.map(async (image) => ({
               id: image.id,
               name: image.name,
               type: image.type,
@@ -563,16 +658,36 @@ function App() {
         })),
       );
 
-      await db.logs.bulkPut(restoredLogs);
+      await db.transaction("rw", db.logs, async () => {
+        await db.logs.bulkPut(restoredLogs);
+      });
+      importWasApplied = true;
       const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
       setLogs(entries.map(normalizeLog));
       if (isSearchView) {
         const allEntries = await db.logs.orderBy("createdAt").toArray();
         setSearchLogs(allEntries.map(normalizeLog).reverse());
       }
-      setBackupMessage(`${restoredLogs.length}件を読み込みました。`);
-    } catch {
-      setBackupMessage("バックアップを読み込めませんでした。");
+      if (isWeeklyView) {
+        const weekEnd = offsetDateKey(weekStart, 6);
+        const weekEntries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
+        setWeeklyLogs(sortLogsByDate(weekEntries));
+      }
+      setBackupMessage(
+        `${restoredLogs.length}件を読み込みました（新規${newCount}件、上書き${overwriteCount}件）。`,
+      );
+    } catch (error) {
+      if (importWasApplied) {
+        setBackupMessage("メモは読み込めましたが、画面を更新できませんでした。アプリを開き直してください。");
+      } else {
+        const reason =
+          error instanceof BackupValidationError
+            ? error.message
+            : error instanceof SyntaxError
+              ? "JSONファイルの形式が正しくありません。"
+              : "ファイルの読み取りまたはデータの保存に失敗しました。";
+        setBackupMessage(`${reason} 既存データは変更していません。`);
+      }
     } finally {
       event.target.value = "";
     }
@@ -594,7 +709,7 @@ function App() {
           <span />
         </button>
         <span className="mobile-brand-title">Baseball Note</span>
-        {!isSearchView ? (
+        {isLogView ? (
           <>
             <h1 className="mobile-context-heading">{isToday ? "今日のログ" : "過去のログ"}</h1>
             <div className="mobile-date-controls" aria-label="日付移動">
@@ -639,7 +754,7 @@ function App() {
 
         <nav className="nav-list">
           <button
-            className={!isSearchView && isToday ? "nav-item active" : "nav-item"}
+            className={isLogView && isToday ? "nav-item active" : "nav-item"}
             type="button"
             onClick={() => {
               setSelectedDate(todayKey);
@@ -674,6 +789,16 @@ function App() {
               }}
             />
           </label>
+          <button
+            className={isWeeklyView ? "nav-item active" : "nav-item"}
+            type="button"
+            onClick={showWeeklyView}
+          >
+            <span className="nav-icon" aria-hidden="true">
+              週
+            </span>
+            <span>週間記録</span>
+          </button>
           <button
             className={isSearchView ? "nav-item active" : "nav-item"}
             type="button"
@@ -721,7 +846,7 @@ function App() {
         {backupMessage ? <p className="sidebar-note">{backupMessage}</p> : null}
       </aside>
 
-      <main className={isSearchView ? "main-pane search-pane" : "main-pane"}>
+      <main className={!isLogView ? "main-pane summary-pane" : "main-pane"}>
         {isSearchView ? (
           <section className="search-screen" aria-label="メモを検索">
             <div className="search-header">
@@ -776,6 +901,86 @@ function App() {
                     </button>
                   ))}
                 </>
+              )}
+            </div>
+          </section>
+        ) : isWeeklyView ? (
+          <section className="weekly-screen" aria-label="週間記録">
+            <header className="weekly-header">
+              <h1>週間記録</h1>
+              <div className="weekly-navigator" aria-label="表示する週を移動">
+                <button
+                  className="weekly-nav-button"
+                  type="button"
+                  onClick={() => moveWeek(-7)}
+                  aria-label="前の週"
+                >
+                  <span aria-hidden="true">＜</span>
+                  <span>前の週</span>
+                </button>
+                <label className="weekly-date-picker">
+                  <span>{formatWeekRange(weekStart)}</span>
+                  <input
+                    type="date"
+                    value={weekStart}
+                    max={todayKey}
+                    onInput={(event) => {
+                      if (event.currentTarget.value && event.currentTarget.value <= todayKey) {
+                        setWeekStart(getWeekStart(event.currentTarget.value));
+                      }
+                    }}
+                    aria-label="週間記録の日付を選択"
+                  />
+                </label>
+                <button
+                  className="weekly-nav-button"
+                  type="button"
+                  onClick={() => moveWeek(7)}
+                  aria-label="次の週"
+                  disabled={isCurrentWeek}
+                >
+                  <span>次の週</span>
+                  <span aria-hidden="true">＞</span>
+                </button>
+              </div>
+            </header>
+
+            <div className="weekly-list" aria-live="polite">
+              {isWeeklyLoading ? (
+                <div className="empty-state">読み込み中...</div>
+              ) : weeklyGroups.length === 0 ? (
+                <div className="empty-state">この週の記録はありません</div>
+              ) : (
+                weeklyGroups.map((group) => (
+                  <section className="weekly-day" key={group.date}>
+                    <h2>{formatWeekDateHeading(group.date)}</h2>
+                    <div className="weekly-day-logs">
+                      {group.logs.map((log) => (
+                        <button
+                          className="weekly-log-item"
+                          type="button"
+                          key={log.id}
+                          onClick={() => openSearchResult(log)}
+                          aria-label={`${formatWeekDateHeading(log.date)}の${log.text || "画像メモ"}を日別画面で開く`}
+                        >
+                          {log.tags.length > 0 ? (
+                            <span className="tag-list saved-tag-list" aria-label="タグ">
+                              {log.tags.map((tag) => (
+                                <span className="tag-chip" key={tag}>
+                                  {tag}
+                                </span>
+                              ))}
+                            </span>
+                          ) : null}
+                          {log.text ? <span className="weekly-log-text">{log.text}</span> : null}
+                          {log.images.map((image) => (
+                            <ImagePreview image={image} key={image.id} />
+                          ))}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                ))
               )}
             </div>
           </section>
