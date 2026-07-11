@@ -140,6 +140,49 @@ function ImagePreview({ image }: { image: LogImage }) {
   );
 }
 
+type TagFilterProps = {
+  selectedTags: LogTag[];
+  onToggle: (tag: LogTag) => void;
+  onClear: () => void;
+};
+
+function TagFilter({ selectedTags, onToggle, onClear }: TagFilterProps) {
+  const hasSelectedTags = selectedTags.length > 0;
+
+  return (
+    <details className="search-filter">
+      <summary>
+        タグで絞る
+        {hasSelectedTags ? <span>{selectedTags.length}件選択</span> : null}
+      </summary>
+      <div className="search-filter-body">
+        <div className="search-filter-tags" aria-label="検索結果をタグで絞り込み">
+          {logTags.map((tag) => {
+            const isSelected = selectedTags.includes(tag);
+
+            return (
+              <button
+                className={isSelected ? "tag-toggle selected" : "tag-toggle"}
+                type="button"
+                key={tag}
+                onClick={() => onToggle(tag)}
+                aria-pressed={isSelected}
+              >
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+        {hasSelectedTags ? (
+          <button className="filter-clear-button" type="button" onClick={onClear}>
+            解除
+          </button>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -175,11 +218,18 @@ function App() {
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
   const searchResults = useMemo(() => {
-    if (!hasSearchQuery) {
-      return searchLogs.slice(0, 20);
-    }
+    const matchingLogs = searchLogs.filter((log) => {
+      const matchesTags =
+        !hasFilter || selectedFilterTags.some((selectedTag) => log.tags.includes(selectedTag));
 
-    return searchLogs.filter((log) => {
+      if (!matchesTags) {
+        return false;
+      }
+
+      if (!hasSearchQuery) {
+        return true;
+      }
+
       const searchableText = [
         log.text,
         ...log.tags,
@@ -191,19 +241,9 @@ function App() {
 
       return searchableText.includes(normalizedSearchQuery);
     });
-  }, [hasSearchQuery, normalizedSearchQuery, searchLogs]);
-  const baseLogs = logs;
-  const filteredLogs = useMemo(() => {
-    if (!hasFilter) {
-      return baseLogs;
-    }
 
-    return baseLogs.filter((log) =>
-      selectedFilterTags.some((selectedFilterTag) => log.tags.includes(selectedFilterTag)),
-    );
-  }, [baseLogs, hasFilter, selectedFilterTags]);
-  const displayedLogCount = filteredLogs.length;
-  const baseLogCount = baseLogs.length;
+    return hasSearchQuery || hasFilter ? matchingLogs : matchingLogs.slice(0, 20);
+  }, [hasFilter, hasSearchQuery, normalizedSearchQuery, searchLogs, selectedFilterTags]);
 
   function closeMenu() {
     setIsMenuOpen(false);
@@ -670,6 +710,11 @@ function App() {
               <button className="search-close-button" type="button" onClick={showLogView} aria-label="検索を閉じる">
                 閉じる
               </button>
+              <TagFilter
+                selectedTags={selectedFilterTags}
+                onToggle={toggleFilterTag}
+                onClear={() => setSelectedFilterTags([])}
+              />
             </div>
 
             <div className="search-result-list" aria-live="polite">
@@ -677,11 +722,15 @@ function App() {
                 <div className="empty-state">読み込み中...</div>
               ) : searchResults.length === 0 ? (
                 <div className="empty-state">
-                  {hasSearchQuery ? "検索に一致するメモはありません。" : "メモはまだありません。"}
+                  {hasSearchQuery || hasFilter
+                    ? "検索条件に一致するメモはありません。"
+                    : "メモはまだありません。"}
                 </div>
               ) : (
                 <>
-                  <p className="search-section-title">{hasSearchQuery ? "検索結果" : "最近"}</p>
+                  <p className="search-section-title">
+                    {hasSearchQuery || hasFilter ? `検索結果 ${searchResults.length}件` : "最近"}
+                  </p>
                   {searchResults.map((log) => (
                     <button
                       className="search-result-item"
@@ -727,46 +776,16 @@ function App() {
               </button>
             </div>
           </div>
-          <span className="log-count">
-            {hasFilter && baseLogCount > 0 ? `${displayedLogCount}/${baseLogCount}件` : `${baseLogCount}件`}
-          </span>
+          <span className="log-count">{logs.length}件</span>
         </header>
-
-        <section className="filter-bar" aria-label="タグで絞り込み">
-          <span className="filter-label">タグ絞り込み</span>
-          <div className="filter-tags">
-            {logTags.map((tag) => {
-              const isSelected = selectedFilterTags.includes(tag);
-
-              return (
-                <button
-                  className={isSelected ? "tag-toggle selected" : "tag-toggle"}
-                  type="button"
-                  key={tag}
-                  onClick={() => toggleFilterTag(tag)}
-                  aria-pressed={isSelected}
-                >
-                  {tag}
-                </button>
-              );
-            })}
-          </div>
-          {hasFilter ? (
-            <button className="filter-clear-button" type="button" onClick={() => setSelectedFilterTags([])}>
-              解除
-            </button>
-          ) : null}
-        </section>
 
         <section className="log-list" aria-live="polite">
           {isLoading ? (
             <div className="empty-state">読み込み中...</div>
           ) : logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
-          ) : filteredLogs.length === 0 ? (
-            <div className="empty-state">選んだタグのメモはありません。</div>
           ) : (
-            filteredLogs.map((log) => {
+            logs.map((log) => {
               const isEditing = editingLogId === log.id;
               const isSavingEdit = savingEditLogId === log.id;
               const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
@@ -782,6 +801,16 @@ function App() {
                     {isEditing ? (
                       <div className="edit-panel">
                         {editingMessage ? <p className="edit-message">{editingMessage}</p> : null}
+                        <textarea
+                          className="edit-textarea"
+                          aria-label={`${formatTime(log.createdAt)}のメモを編集`}
+                          rows={3}
+                          value={editingText}
+                          onChange={(event) => setEditingText(event.target.value)}
+                        />
+                        {log.images.map((image) => (
+                          <ImagePreview image={image} key={image.id} />
+                        ))}
                         <div className="tag-list edit-tag-list" aria-label="タグを編集">
                           {logTags.map((tag) => {
                             const isSelected = editingTags.includes(tag);
@@ -799,16 +828,6 @@ function App() {
                             );
                           })}
                         </div>
-                        <textarea
-                          className="edit-textarea"
-                          aria-label={`${formatTime(log.createdAt)}のメモを編集`}
-                          rows={3}
-                          value={editingText}
-                          onChange={(event) => setEditingText(event.target.value)}
-                        />
-                        {log.images.map((image) => (
-                          <ImagePreview image={image} key={image.id} />
-                        ))}
                         <div className="edit-actions">
                           <button
                             className="log-action-button"
@@ -831,8 +850,12 @@ function App() {
                     ) : (
                       <>
                         <div className="log-body">
+                          {log.text ? <p>{log.text}</p> : null}
+                          {log.images.map((image) => (
+                            <ImagePreview image={image} key={image.id} />
+                          ))}
                           {log.tags.length > 0 ? (
-                            <div className="tag-list" aria-label="タグ">
+                            <div className="tag-list saved-tag-list" aria-label="タグ">
                               {log.tags.map((tag) => (
                                 <span className="tag-chip" key={tag}>
                                   {tag}
@@ -840,10 +863,6 @@ function App() {
                               ))}
                             </div>
                           ) : null}
-                          {log.text ? <p>{log.text}</p> : null}
-                          {log.images.map((image) => (
-                            <ImagePreview image={image} key={image.id} />
-                          ))}
                         </div>
                         <div className="log-actions">
                           <button
