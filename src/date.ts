@@ -10,6 +10,11 @@ export function formatDisplayDate(dateKey: string): string {
   return `${year}/${month}/${day}`;
 }
 
+export function formatShortDate(dateKey: string): string {
+  const [, month, day] = dateKey.split("-");
+  return `${Number(month)}/${Number(day)}`;
+}
+
 export function offsetDateKey(dateKey: string, offsetDays: number): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   const date = new Date(year, month - 1, day);

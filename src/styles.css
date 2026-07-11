@@ -71,6 +71,14 @@ button:disabled {
   font-weight: 650;
 }
 
+.brand-title {
+  white-space: nowrap;
+}
+
+.mobile-selected-date {
+  display: none;
+}
+
 .brand-mark {
   display: grid;
   width: 28px;
@@ -240,6 +248,10 @@ h1 {
   letter-spacing: 0;
 }
 
+.mobile-log-heading {
+  display: none;
+}
+
 .date-navigator {
   display: flex;
   align-items: center;
@@ -263,6 +275,17 @@ h1 {
 
 .date-nav-button:hover {
   background: #f0eee8;
+}
+
+.date-nav-button:disabled {
+  border-color: #e3e1da;
+  background: #eeece7;
+  color: #aaa79e;
+  cursor: not-allowed;
+}
+
+.date-nav-button:disabled:hover {
+  background: #eeece7;
 }
 
 .log-count {
@@ -789,12 +812,32 @@ h1 {
   }
 
   .mobile-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
     align-items: center;
-    gap: 12px;
+    column-gap: 12px;
     border-bottom: 1px solid #e4e3de;
     background: #f1f0ec;
     padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+  }
+
+  .mobile-header .brand {
+    min-width: 0;
+  }
+
+  .mobile-header .brand-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-selected-date {
+    display: block;
+    flex: 0 0 auto;
+    color: #4f4e47;
+    font-size: 13px;
+    font-weight: 650;
+    white-space: nowrap;
   }
 
   .menu-backdrop {
@@ -859,10 +902,42 @@ h1 {
   }
 
   .topbar {
+    gap: 8px;
     padding: 16px;
   }
 
+  .topbar-main {
+    display: contents;
+  }
+
+  .topbar .eyebrow,
+  .desktop-date-heading {
+    display: none;
+  }
+
+  .date-navigator {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .date-navigator h1 {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: center;
+  }
+
+  .mobile-log-heading {
+    display: block;
+    overflow: hidden;
+    font-size: 17px;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .date-nav-button {
+    flex: 0 0 40px;
     width: 40px;
     height: 40px;
   }
@@ -971,11 +1046,13 @@ h1 {
   }
 
   .topbar {
-    align-items: flex-start;
+    padding-right: 12px;
+    padding-left: 12px;
   }
 
   .log-count {
-    margin-top: 2px;
+    padding-right: 8px;
+    padding-left: 8px;
   }
 
   .attach-button,

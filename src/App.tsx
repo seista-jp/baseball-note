@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { db } from "./db";
-import { formatDisplayDate, formatTime, offsetDateKey, toDateKey } from "./date";
+import { formatDisplayDate, formatShortDate, formatTime, offsetDateKey, toDateKey } from "./date";
 import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
@@ -595,8 +595,9 @@ function App() {
         </button>
         <div className="brand">
           <span className="brand-mark">B</span>
-          <span>Baseball Note</span>
+          <span className="brand-title">Baseball Note</span>
         </div>
+        {!isSearchView ? <span className="mobile-selected-date">{formatShortDate(selectedDate)}</span> : null}
       </header>
 
       {isMenuOpen ? (
@@ -639,7 +640,12 @@ function App() {
             <input
               type="date"
               value={selectedDate}
+              max={todayKey}
               onChange={(event) => {
+                if (event.target.value > todayKey) {
+                  return;
+                }
+
                 setSelectedDate(event.target.value);
                 showLogView();
                 closeMenu();
@@ -754,7 +760,7 @@ function App() {
         ) : (
           <>
         <header className="topbar">
-          <div>
+          <div className="topbar-main">
             <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
             <div className="date-navigator" aria-label="日付移動">
               <button
@@ -765,12 +771,16 @@ function App() {
               >
                 ＜
               </button>
-              <h1>{formatDisplayDate(selectedDate)}</h1>
+              <h1>
+                <span className="desktop-date-heading">{formatDisplayDate(selectedDate)}</span>
+                <span className="mobile-log-heading">{isToday ? "今日のログ" : "過去のログ"}</span>
+              </h1>
               <button
                 className="date-nav-button"
                 type="button"
                 onClick={() => moveSelectedDate(1)}
                 aria-label="翌日へ移動"
+                disabled={isToday}
               >
                 ＞
               </button>
