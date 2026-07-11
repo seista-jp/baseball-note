@@ -593,11 +593,33 @@ function App() {
           <span />
           <span />
         </button>
-        <div className="brand">
-          <span className="brand-mark">B</span>
-          <span className="brand-title">Baseball Note</span>
-        </div>
-        {!isSearchView ? <span className="mobile-selected-date">{formatShortDate(selectedDate)}</span> : null}
+        <span className="mobile-brand-title">Baseball Note</span>
+        {!isSearchView ? (
+          <>
+            <h1 className="mobile-context-heading">{isToday ? "今日のログ" : "過去のログ"}</h1>
+            <div className="mobile-date-controls" aria-label="日付移動">
+              <button
+                className="mobile-date-nav-button"
+                type="button"
+                onClick={() => moveSelectedDate(-1)}
+                aria-label="前日へ移動"
+              >
+                ＜
+              </button>
+              <span className="mobile-selected-date">{formatShortDate(selectedDate)}</span>
+              {isToday ? <span className="mobile-today-label">今日</span> : null}
+              <button
+                className="mobile-date-nav-button"
+                type="button"
+                onClick={() => moveSelectedDate(1)}
+                aria-label="翌日へ移動"
+                disabled={isToday}
+              >
+                ＞
+              </button>
+            </div>
+          </>
+        ) : null}
       </header>
 
       {isMenuOpen ? (
@@ -772,8 +794,7 @@ function App() {
                 ＜
               </button>
               <h1>
-                <span className="desktop-date-heading">{formatDisplayDate(selectedDate)}</span>
-                <span className="mobile-log-heading">{isToday ? "今日のログ" : "過去のログ"}</span>
+                {formatDisplayDate(selectedDate)}
               </h1>
               <button
                 className="date-nav-button"
