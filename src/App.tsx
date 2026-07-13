@@ -23,6 +23,7 @@ const currentWeekStart = getWeekStart(todayKey);
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
 const maxImageSize = 1400;
 const imageQuality = 0.82;
+const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
@@ -120,6 +121,53 @@ function sortLogsByDate(entries: StoredLogEntry[]): LogEntry[] {
     );
 }
 
+function tagsAreEqual(firstTags: LogTag[], secondTags: LogTag[]): boolean {
+  return (
+    firstTags.length === secondTags.length &&
+    firstTags.every((tag, index) => tag === secondTags[index])
+  );
+}
+
+function resizeTextarea(textarea: HTMLTextAreaElement): void {
+  textarea.style.height = "0px";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function getTextOffsetAtPoint(
+  container: HTMLElement,
+  clientX: number,
+  clientY: number,
+  textLength: number,
+): number {
+  const caretDocument = document as Document & {
+    caretPositionFromPoint?: (
+      x: number,
+      y: number,
+    ) => { offsetNode: Node; offset: number } | null;
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+  };
+  const caretPosition = caretDocument.caretPositionFromPoint?.(clientX, clientY);
+  const caretRange = caretPosition
+    ? null
+    : caretDocument.caretRangeFromPoint?.(clientX, clientY) ?? null;
+  const offsetNode = caretPosition?.offsetNode ?? caretRange?.startContainer;
+  const offset = caretPosition?.offset ?? caretRange?.startOffset;
+
+  if (!offsetNode || offset === undefined || !container.contains(offsetNode)) {
+    return textLength;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(container);
+
+  try {
+    range.setEnd(offsetNode, offset);
+    return Math.min(textLength, range.toString().length);
+  } catch {
+    return textLength;
+  }
+}
+
 function formatSearchDateLabel(dateKey: string): string {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -155,36 +203,6 @@ function ImagePreview({ image }: { image: LogImage }) {
     <figure className="log-image">
       <img alt={image.name} src={url} />
     </figure>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-      <path
-        d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Zm10-12 3 3"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
-      <path
-        d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-    </svg>
   );
 }
 
@@ -261,8 +279,17 @@ function App() {
   const [editingMessage, setEditingMessage] = useState("");
   const [savingEditLogId, setSavingEditLogId] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [showInlineEditHint, setShowInlineEditHint] = useState(() => {
+    try {
+      return window.localStorage.getItem(inlineEditHintStorageKey) !== "1";
+    } catch {
+      return true;
+    }
+  });
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingCaretRef = useRef<{ logId: string; start: number; end: number } | null>(null);
 
   const isToday = selectedDate === todayKey;
   const trimmedText = text.trim();
@@ -275,6 +302,14 @@ function App() {
   const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
+  const editingLog = useMemo(
+    () => logs.find((log) => log.id === editingLogId) ?? null,
+    [editingLogId, logs],
+  );
+  const hasUnsavedEdit = Boolean(
+    editingLog &&
+      (editingText !== editingLog.text || !tagsAreEqual(editingTags, editingLog.tags)),
+  );
   const searchResults = useMemo(() => {
     const matchingLogs = searchLogs.filter((log) => {
       const matchesTags =
@@ -314,6 +349,95 @@ function App() {
     return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
   }, [weeklyLogs]);
 
+  useEffect(() => {
+    if (!editingLogId) {
+      editingTextareaRef.current = null;
+      return;
+    }
+
+    const textarea = editingTextareaRef.current;
+
+    if (!textarea) {
+      return;
+    }
+
+    const pendingCaret = pendingCaretRef.current;
+
+    if (pendingCaret?.logId === editingLogId) {
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(pendingCaret.start, pendingCaret.end);
+      pendingCaretRef.current = null;
+    } else if (document.activeElement !== textarea) {
+      textarea.focus({ preventScroll: true });
+    }
+    textarea.scrollIntoView({ block: "center" });
+
+    const timeoutId = window.setTimeout(() => {
+      editingTextareaRef.current?.scrollIntoView({ block: "nearest" });
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [editingLogId]);
+
+  useEffect(() => {
+    if (!hasUnsavedEdit) {
+      return;
+    }
+
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasUnsavedEdit]);
+
+  function focusCurrentEditor() {
+    window.requestAnimationFrame(() => {
+      editingTextareaRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function focusLogEntry(logId: string) {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-log-id="${logId}"]`)?.focus();
+    });
+  }
+
+  function focusLogList() {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".log-list")?.focus();
+    });
+  }
+
+  function dismissInlineEditHint() {
+    setShowInlineEditHint(false);
+
+    try {
+      window.localStorage.setItem(inlineEditHintStorageKey, "1");
+    } catch {
+      // localStorageを使用できない環境でも、現在の表示中は案内を閉じる。
+    }
+  }
+
+  function prepareToLeaveEditing(): boolean {
+    if (!editingLogId) {
+      return true;
+    }
+
+    if (
+      hasUnsavedEdit &&
+      !window.confirm("編集内容が保存されていません。移動しますか？")
+    ) {
+      focusCurrentEditor();
+      return false;
+    }
+
+    cancelEditingLog(false);
+    return true;
+  }
+
   function closeMenu() {
     setIsMenuOpen(false);
   }
@@ -324,12 +448,22 @@ function App() {
   }
 
   function showSearchView() {
+    if (!prepareToLeaveEditing()) {
+      closeMenu();
+      return;
+    }
+
     setViewMode("search");
     setSearchQuery("");
     closeMenu();
   }
 
   function showWeeklyView() {
+    if (!prepareToLeaveEditing()) {
+      closeMenu();
+      return;
+    }
+
     setWeekStart(currentWeekStart);
     setViewMode("weekly");
     closeMenu();
@@ -342,6 +476,10 @@ function App() {
   }
 
   function moveSelectedDate(offsetDays: number) {
+    if (!prepareToLeaveEditing()) {
+      return;
+    }
+
     setSelectedDate((currentDate) => offsetDateKey(currentDate, offsetDays));
   }
 
@@ -589,18 +727,38 @@ function App() {
     );
   }
 
-  function startEditingLog(log: LogEntry) {
+  function startEditingLog(log: LogEntry): boolean {
+    dismissInlineEditHint();
+
+    if (editingLogId === log.id) {
+      return true;
+    }
+
+    if (
+      editingLogId &&
+      hasUnsavedEdit &&
+      !window.confirm("編集内容が保存されていません。別のメモを編集しますか？")
+    ) {
+      focusCurrentEditor();
+      return false;
+    }
+
     setEditingLogId(log.id);
     setEditingText(log.text);
     setEditingTags(log.tags);
     setEditingMessage("");
+    return true;
   }
 
-  function cancelEditingLog() {
+  function cancelEditingLog(restoreFocus = true, focusLogId = editingLogId) {
     setEditingLogId(null);
     setEditingText("");
     setEditingTags([]);
     setEditingMessage("");
+
+    if (restoreFocus && focusLogId) {
+      focusLogEntry(focusLogId);
+    }
   }
 
   function toggleEditingTag(tag: LogTag) {
@@ -614,8 +772,24 @@ function App() {
   async function handleUpdateLog(log: LogEntry) {
     const nextText = editingText.trim();
 
-    if (!nextText && log.images.length === 0) {
-      setEditingMessage("本文が空のメモは保存できません。");
+    if (log.text.trim() && !nextText) {
+      const shouldDelete = window.confirm("本文が空です。このメモを削除しますか？");
+
+      if (!shouldDelete) {
+        focusCurrentEditor();
+        return;
+      }
+
+      setSavingEditLogId(log.id);
+      setEditingMessage("");
+      const wasDeleted = await deleteLog(log.id);
+      setSavingEditLogId(null);
+
+      if (wasDeleted) {
+        cancelEditingLog(false);
+        focusLogList();
+      }
+
       return;
     }
 
@@ -636,7 +810,10 @@ function App() {
       setSearchLogs((currentLogs) =>
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
-      cancelEditingLog();
+      setWeeklyLogs((currentLogs) =>
+        currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
+      );
+      cancelEditingLog(true, log.id);
     } catch (error) {
       setEditingMessage(
         `${getDataWriteErrorMessage(
@@ -649,23 +826,38 @@ function App() {
     }
   }
 
-  async function handleDeleteLog(logId: string) {
-    const shouldDelete = window.confirm("このメモを削除しますか？");
-
-    if (!shouldDelete) {
-      return;
-    }
-
+  async function deleteLog(logId: string): Promise<boolean> {
     setOperationError("");
 
     try {
       await db.logs.delete(logId);
       setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
       setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+      setWeeklyLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+      return true;
     } catch {
       setOperationError(
         "メモを削除できませんでした。メモは残っています。もう一度試してください。",
       );
+      return false;
+    }
+  }
+
+  async function handleDeleteLog(logId: string) {
+    const shouldDelete = window.confirm("このメモを削除しますか？");
+
+    if (!shouldDelete) {
+      focusCurrentEditor();
+      return;
+    }
+
+    setSavingEditLogId(logId);
+    const wasDeleted = await deleteLog(logId);
+    setSavingEditLogId(null);
+
+    if (wasDeleted) {
+      cancelEditingLog(false);
+      focusLogList();
     }
   }
 
@@ -873,6 +1065,11 @@ function App() {
             className={isLogView && isToday ? "nav-item active" : "nav-item"}
             type="button"
             onClick={() => {
+              if (!prepareToLeaveEditing()) {
+                closeMenu();
+                return;
+              }
+
               setSelectedDate(todayKey);
               showLogView();
               closeMenu();
@@ -896,6 +1093,11 @@ function App() {
               max={todayKey}
               onChange={(event) => {
                 if (event.target.value > todayKey) {
+                  return;
+                }
+
+                if (!prepareToLeaveEditing()) {
+                  closeMenu();
                   return;
                 }
 
@@ -942,6 +1144,11 @@ function App() {
             className="nav-item"
             type="button"
             onClick={() => {
+              if (!prepareToLeaveEditing()) {
+                closeMenu();
+                return;
+              }
+
               importInputRef.current?.click();
               closeMenu();
             }}
@@ -971,7 +1178,15 @@ function App() {
         </div>
       ) : null}
 
-      <main className={!isLogView ? "main-pane summary-pane" : "main-pane"}>
+      <main
+        className={
+          !isLogView
+            ? "main-pane summary-pane"
+            : hasUnsavedEdit
+              ? "main-pane has-edit-save-bar"
+              : "main-pane"
+        }
+      >
         {isSearchView ? (
           <section className="search-screen" aria-label="メモを検索">
             <div className="search-header">
@@ -1148,7 +1363,19 @@ function App() {
           <span className="log-count">{logs.length}件</span>
         </header>
 
-        <section className="log-list" aria-live="polite">
+        <section className="log-list" aria-live="polite" tabIndex={-1}>
+          {showInlineEditHint && logs.length > 0 && !isLoading && !logLoadError ? (
+            <div className="inline-edit-hint" role="status">
+              <span>メモをタップすると編集できます</span>
+              <button
+                type="button"
+                onClick={dismissInlineEditHint}
+                aria-label="メモ編集の案内を閉じる"
+              >
+                閉じる
+              </button>
+            </div>
+          ) : null}
           {isLoading ? (
             <div className="empty-state">読み込み中...</div>
           ) : logLoadError ? (
@@ -1161,29 +1388,125 @@ function App() {
             logs.map((log) => {
               const isEditing = editingLogId === log.id;
               const isSavingEdit = savingEditLogId === log.id;
-              const canSaveEdit = Boolean(editingText.trim() || log.images.length > 0) && !isSavingEdit;
+              const visibleText = isEditing ? editingText : log.text;
+              const visibleTags = isEditing ? editingTags : log.tags;
 
               return (
                 <article
                   className={highlightedLogId === log.id ? "log-entry highlighted" : "log-entry"}
                   data-log-id={log.id}
                   key={log.id}
+                  tabIndex={-1}
                 >
-                  <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
-                  <div className="log-content">
-                    {isEditing ? (
-                      <div className="edit-panel">
-                        {editingMessage ? <p className="edit-message">{editingMessage}</p> : null}
-                        <textarea
-                          className="edit-textarea"
-                          aria-label={`${formatTime(log.createdAt)}のメモを編集`}
-                          rows={3}
-                          value={editingText}
-                          onChange={(event) => setEditingText(event.target.value)}
-                        />
-                        {log.images.map((image) => (
-                          <ImagePreview image={image} key={image.id} />
+                  <div className="log-meta">
+                    <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
+                    {visibleTags.length > 0 ? (
+                      <div className="tag-list saved-tag-list" aria-label="タグ">
+                        {visibleTags.map((tag) => (
+                          <span className="tag-chip" key={tag}>
+                            {tag}
+                          </span>
                         ))}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="log-content">
+                    {isEditing && editingMessage ? (
+                      <p className="edit-message" role="alert">
+                        {editingMessage}
+                      </p>
+                    ) : null}
+                    <div className={isEditing ? "log-body editing" : "log-body"}>
+                      {isEditing ? (
+                        <textarea
+                          ref={(textarea) => {
+                            if (!textarea) {
+                              return;
+                            }
+
+                            resizeTextarea(textarea);
+                            editingTextareaRef.current = textarea;
+                          }}
+                          className="inline-edit-textarea editing"
+                          aria-label={`${formatTime(log.createdAt)}のメモを編集中`}
+                          rows={1}
+                          value={visibleText}
+                          placeholder="本文を入力"
+                          onChange={(event) => {
+                            setEditingText(event.target.value);
+                            resizeTextarea(event.currentTarget);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.preventDefault();
+                              cancelEditingLog();
+                              return;
+                            }
+
+                            if (
+                              event.key === "Enter" &&
+                              (event.metaKey || event.ctrlKey) &&
+                              hasUnsavedEdit &&
+                              !isSavingEdit
+                            ) {
+                              event.preventDefault();
+                              handleUpdateLog(log);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          className="inline-edit-trigger"
+                          type="button"
+                          aria-label={`${formatTime(log.createdAt)}のメモ。タップまたはキーボードで編集`}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") {
+                              return;
+                            }
+
+                            event.preventDefault();
+                            pendingCaretRef.current = {
+                              logId: log.id,
+                              start: log.text.length,
+                              end: log.text.length,
+                            };
+
+                            if (!startEditingLog(log)) {
+                              pendingCaretRef.current = null;
+                            }
+                          }}
+                          onClick={(event) => {
+                            const caretOffset =
+                              event.detail > 0
+                                ? getTextOffsetAtPoint(
+                                    event.currentTarget,
+                                    event.clientX,
+                                    event.clientY,
+                                    log.text.length,
+                                  )
+                                : log.text.length;
+
+                            pendingCaretRef.current = {
+                              logId: log.id,
+                              start: caretOffset,
+                              end: caretOffset,
+                            };
+
+                            if (!startEditingLog(log)) {
+                              pendingCaretRef.current = null;
+                            }
+                          }}
+                        >
+                          <span>{log.text || "画像メモを編集"}</span>
+                        </button>
+                      )}
+                      {log.images.map((image) => (
+                        <ImagePreview image={image} key={image.id} />
+                      ))}
+                    </div>
+                    {isEditing ? (
+                      <div className="inline-edit-options">
+                        <span className="inline-edit-label">タグ</span>
                         <div className="tag-list edit-tag-list" aria-label="タグを編集">
                           {logTags.map((tag) => {
                             const isSelected = editingTags.includes(tag);
@@ -1195,76 +1518,57 @@ function App() {
                                 key={tag}
                                 onClick={() => toggleEditingTag(tag)}
                                 aria-pressed={isSelected}
+                                disabled={isSavingEdit}
                               >
                                 {tag}
                               </button>
                             );
                           })}
                         </div>
-                        <div className="edit-actions">
-                          <button
-                            className="log-action-button"
-                            type="button"
-                            onClick={cancelEditingLog}
-                            disabled={isSavingEdit}
-                          >
-                            キャンセル
-                          </button>
-                          <button
-                            className="log-action-button primary"
-                            type="button"
-                            onClick={() => handleUpdateLog(log)}
-                            disabled={!canSaveEdit}
-                          >
-                            {isSavingEdit ? "保存中" : "保存"}
-                          </button>
-                        </div>
+                        <button
+                          className="inline-delete-button"
+                          type="button"
+                          onClick={() => handleDeleteLog(log.id)}
+                          disabled={isSavingEdit}
+                        >
+                          このメモを削除
+                        </button>
                       </div>
-                    ) : (
-                      <>
-                        <div className="log-body">
-                          {log.text ? <p>{log.text}</p> : null}
-                          {log.images.map((image) => (
-                            <ImagePreview image={image} key={image.id} />
-                          ))}
-                        </div>
-                        <div className="log-meta-row">
-                          {log.tags.length > 0 ? (
-                            <div className="tag-list saved-tag-list" aria-label="タグ">
-                              {log.tags.map((tag) => (
-                                <span className="tag-chip" key={tag}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
-                          <div className="log-actions">
-                            <button
-                              className="log-icon-button"
-                              type="button"
-                              onClick={() => startEditingLog(log)}
-                              aria-label={`${formatTime(log.createdAt)}のメモを編集`}
-                            >
-                              <PencilIcon />
-                            </button>
-                            <button
-                              className="log-icon-button danger"
-                              type="button"
-                              onClick={() => handleDeleteLog(log.id)}
-                              aria-label={`${formatTime(log.createdAt)}のメモを削除`}
-                            >
-                              <TrashIcon />
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
+                    ) : null}
                   </div>
                 </article>
               );
             })
           )}
         </section>
+
+        {editingLog && hasUnsavedEdit ? (
+          <div className="edit-save-bar" role="region" aria-label="メモの変更を保存">
+            <span className="edit-save-status" aria-live="polite">
+              変更があります
+            </span>
+            <div className="edit-save-actions">
+              <button
+                className="edit-save-cancel"
+                type="button"
+                onClick={() => cancelEditingLog()}
+                disabled={savingEditLogId === editingLog.id}
+                aria-label="メモの変更をキャンセル"
+              >
+                キャンセル
+              </button>
+              <button
+                className="edit-save-submit"
+                type="button"
+                onClick={() => handleUpdateLog(editingLog)}
+                disabled={savingEditLogId === editingLog.id}
+                aria-label="メモの変更を保存"
+              >
+                {savingEditLogId === editingLog.id ? "保存中" : "保存"}
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
           {submitMessage ? <p className="composer-message">{submitMessage}</p> : null}
