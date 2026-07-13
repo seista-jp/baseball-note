@@ -158,6 +158,36 @@ function ImagePreview({ image }: { image: LogImage }) {
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path
+        d="M4 20h4l10.5-10.5a2.12 2.12 0 0 0-3-3L5 17v3Zm10-12 3 3"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24">
+      <path
+        d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
+  );
+}
+
 type TagFilterProps = {
   selectedTags: LogTag[];
   onToggle: (tag: LogTag) => void;
@@ -1197,6 +1227,8 @@ function App() {
                           {log.images.map((image) => (
                             <ImagePreview image={image} key={image.id} />
                           ))}
+                        </div>
+                        <div className="log-meta-row">
                           {log.tags.length > 0 ? (
                             <div className="tag-list saved-tag-list" aria-label="タグ">
                               {log.tags.map((tag) => (
@@ -1206,24 +1238,24 @@ function App() {
                               ))}
                             </div>
                           ) : null}
-                        </div>
-                        <div className="log-actions">
-                          <button
-                            className="log-action-button"
-                            type="button"
-                            onClick={() => startEditingLog(log)}
-                            aria-label={`${formatTime(log.createdAt)}のメモを編集`}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="log-action-button danger"
-                            type="button"
-                            onClick={() => handleDeleteLog(log.id)}
-                            aria-label={`${formatTime(log.createdAt)}のメモを削除`}
-                          >
-                            削除
-                          </button>
+                          <div className="log-actions">
+                            <button
+                              className="log-icon-button"
+                              type="button"
+                              onClick={() => startEditingLog(log)}
+                              aria-label={`${formatTime(log.createdAt)}のメモを編集`}
+                            >
+                              <PencilIcon />
+                            </button>
+                            <button
+                              className="log-icon-button danger"
+                              type="button"
+                              onClick={() => handleDeleteLog(log.id)}
+                              aria-label={`${formatTime(log.createdAt)}のメモを削除`}
+                            >
+                              <TrashIcon />
+                            </button>
+                          </div>
                         </div>
                       </>
                     )}
