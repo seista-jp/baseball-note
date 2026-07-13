@@ -185,6 +185,45 @@ button:disabled {
   display: none;
 }
 
+.operation-error {
+  position: fixed;
+  top: 18px;
+  right: 24px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(calc(100vw - 308px), 680px);
+  border: 1px solid #d8b9b3;
+  border-radius: 10px;
+  background: #fff7f5;
+  box-shadow: 0 10px 28px rgba(64, 37, 32, 0.14);
+  color: #6f2f29;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
+}
+
+.operation-error span {
+  flex: 1 1 auto;
+}
+
+.operation-error button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  border: 1px solid #d8b9b3;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #6f2f29;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 7px 10px;
+}
+
+.operation-error button:hover {
+  background: #f8e9e6;
+}
+
 .date-picker {
   display: grid;
   gap: 8px;
@@ -633,6 +672,14 @@ h1 {
   line-height: 1.7;
 }
 
+.data-error-state {
+  border: 1px solid #e0c3bd;
+  border-radius: 8px;
+  background: #fff7f5;
+  color: #6f2f29;
+  padding: 12px 14px;
+}
+
 .log-entry {
   display: grid;
   grid-template-columns: 56px minmax(0, 680px);
@@ -1038,6 +1085,14 @@ h1 {
     border: 0;
     background: rgba(32, 32, 28, 0.36);
     padding: 0;
+  }
+
+  .operation-error {
+    top: calc(70px + env(safe-area-inset-top));
+    right: 12px;
+    left: 12px;
+    z-index: 15;
+    width: auto;
   }
 
   .sidebar {

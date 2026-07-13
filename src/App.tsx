@@ -4,6 +4,7 @@ import {
   validateBackup,
   type BackupLogEntry,
 } from "./backup";
+import { getDataWriteErrorMessage } from "./dataError";
 import { db } from "./db";
 import {
   formatDisplayDate,
@@ -215,9 +216,13 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isWeeklyLoading, setIsWeeklyLoading] = useState(false);
+  const [logLoadError, setLogLoadError] = useState("");
+  const [searchLoadError, setSearchLoadError] = useState("");
+  const [weeklyLoadError, setWeeklyLoadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [operationError, setOperationError] = useState("");
   const [viewMode, setViewMode] = useState<"logs" | "search" | "weekly">("logs");
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
@@ -322,14 +327,27 @@ function App() {
 
     async function loadLogs() {
       setIsLoading(true);
-      const entries = await db.logs
-        .where("date")
-        .equals(selectedDate)
-        .sortBy("createdAt");
+      setLogLoadError("");
 
-      if (isActive) {
-        setLogs(entries.map(normalizeLog));
-        setIsLoading(false);
+      try {
+        const entries = await db.logs
+          .where("date")
+          .equals(selectedDate)
+          .sortBy("createdAt");
+
+        if (isActive) {
+          setLogs(entries.map(normalizeLog));
+        }
+      } catch {
+        if (isActive) {
+          setLogLoadError(
+            "この日のメモを読み込めませんでした。画面を再読み込みして、もう一度試してください。",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
       }
     }
 
@@ -346,16 +364,30 @@ function App() {
     async function loadSearchLogs() {
       if (!isSearchView) {
         setSearchLogs([]);
+        setSearchLoadError("");
         setIsSearchLoading(false);
         return;
       }
 
       setIsSearchLoading(true);
-      const entries = await db.logs.orderBy("createdAt").toArray();
+      setSearchLoadError("");
 
-      if (isActive) {
-        setSearchLogs(entries.map(normalizeLog).reverse());
-        setIsSearchLoading(false);
+      try {
+        const entries = await db.logs.orderBy("createdAt").toArray();
+
+        if (isActive) {
+          setSearchLogs(entries.map(normalizeLog).reverse());
+        }
+      } catch {
+        if (isActive) {
+          setSearchLoadError(
+            "検索用のメモを読み込めませんでした。検索画面を開き直すか、画面を再読み込みしてください。",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsSearchLoading(false);
+        }
       }
     }
 
@@ -372,17 +404,31 @@ function App() {
     async function loadWeeklyLogs() {
       if (!isWeeklyView) {
         setWeeklyLogs([]);
+        setWeeklyLoadError("");
         setIsWeeklyLoading(false);
         return;
       }
 
       setIsWeeklyLoading(true);
-      const weekEnd = offsetDateKey(weekStart, 6);
-      const entries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
+      setWeeklyLoadError("");
 
-      if (isActive) {
-        setWeeklyLogs(sortLogsByDate(entries));
-        setIsWeeklyLoading(false);
+      try {
+        const weekEnd = offsetDateKey(weekStart, 6);
+        const entries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
+
+        if (isActive) {
+          setWeeklyLogs(sortLogsByDate(entries));
+        }
+      } catch {
+        if (isActive) {
+          setWeeklyLoadError(
+            "週間記録を読み込めませんでした。週間記録を開き直すか、画面を再読み込みしてください。",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsWeeklyLoading(false);
+        }
       }
     }
 
@@ -457,8 +503,13 @@ function App() {
       if (imageInputRef.current) {
         imageInputRef.current.value = "";
       }
-    } catch {
-      setSubmitMessage("保存できませんでした。画像を小さくするか、もう一度試してください。");
+    } catch (error) {
+      setSubmitMessage(
+        `${getDataWriteErrorMessage(
+          error,
+          "メモを保存できませんでした。もう一度試してください。",
+        )} 入力内容は残っています。`,
+      );
     } finally {
       setIsSaving(false);
     }
@@ -556,8 +607,13 @@ function App() {
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
       cancelEditingLog();
-    } catch {
-      setEditingMessage("更新できませんでした。もう一度試してください。");
+    } catch (error) {
+      setEditingMessage(
+        `${getDataWriteErrorMessage(
+          error,
+          "変更を保存できませんでした。もう一度試してください。",
+        )} 編集内容は残っています。`,
+      );
     } finally {
       setSavingEditLogId(null);
     }
@@ -570,42 +626,63 @@ function App() {
       return;
     }
 
-    await db.logs.delete(logId);
-    setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
-    setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+    setOperationError("");
+
+    try {
+      await db.logs.delete(logId);
+      setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+      setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+    } catch {
+      setOperationError(
+        "メモを削除できませんでした。メモは残っています。もう一度試してください。",
+      );
+    }
   }
 
   async function handleExportBackup() {
-    const allLogs = await db.logs.orderBy("createdAt").toArray();
-    const backupLogs: BackupLogEntry[] = await Promise.all(
-      allLogs.map(async (log) => {
-        const normalizedLog = normalizeLog(log);
+    setOperationError("");
+    let url = "";
 
-        return {
-          ...normalizedLog,
-          images: await Promise.all(
-            normalizedLog.images.map(async (image) => ({
-              id: image.id,
-              name: image.name,
-              type: image.type,
-              createdAt: image.createdAt,
-              dataUrl: await readFileAsDataUrl(image.blob),
-            })),
-          ),
-        };
-      }),
-    );
+    try {
+      const allLogs = await db.logs.orderBy("createdAt").toArray();
+      const backupLogs: BackupLogEntry[] = await Promise.all(
+        allLogs.map(async (log) => {
+          const normalizedLog = normalizeLog(log);
 
-    const blob = new Blob([JSON.stringify({ version: 1, logs: backupLogs }, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `baseball-note-backup-${todayKey}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setBackupMessage(`${allLogs.length}件を書き出しました。`);
+          return {
+            ...normalizedLog,
+            images: await Promise.all(
+              normalizedLog.images.map(async (image) => ({
+                id: image.id,
+                name: image.name,
+                type: image.type,
+                createdAt: image.createdAt,
+                dataUrl: await readFileAsDataUrl(image.blob),
+              })),
+            ),
+          };
+        }),
+      );
+
+      const blob = new Blob([JSON.stringify({ version: 1, logs: backupLogs }, null, 2)], {
+        type: "application/json",
+      });
+      url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `baseball-note-backup-${todayKey}.json`;
+      link.click();
+      setBackupMessage(`${allLogs.length}件を書き出しました。`);
+    } catch {
+      const message =
+        "バックアップを書き出せませんでした。画面を再読み込みして、もう一度試してください。";
+      setBackupMessage(message);
+      setOperationError(message);
+    } finally {
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+    }
   }
 
   async function handleImportBackup(event: ChangeEvent<HTMLInputElement>) {
@@ -617,6 +694,7 @@ function App() {
     }
 
     try {
+      setOperationError("");
       setBackupMessage("バックアップを確認しています。");
       const parsed: unknown = JSON.parse(await file.text());
       const { logs: backupLogs } = validateBackup(parsed);
@@ -678,15 +756,23 @@ function App() {
       );
     } catch (error) {
       if (importWasApplied) {
-        setBackupMessage("メモは読み込めましたが、画面を更新できませんでした。アプリを開き直してください。");
+        const message =
+          "メモは読み込めましたが、画面を更新できませんでした。アプリを開き直してください。";
+        setBackupMessage(message);
+        setOperationError(message);
       } else {
         const reason =
           error instanceof BackupValidationError
             ? error.message
             : error instanceof SyntaxError
               ? "JSONファイルの形式が正しくありません。"
-              : "ファイルの読み取りまたはデータの保存に失敗しました。";
-        setBackupMessage(`${reason} 既存データは変更していません。`);
+              : getDataWriteErrorMessage(
+                  error,
+                  "ファイルの読み取りまたはデータの保存に失敗しました。もう一度試してください。",
+                );
+        const message = `${reason} 既存データは変更していません。`;
+        setBackupMessage(message);
+        setOperationError(message);
       }
     } finally {
       event.target.value = "";
@@ -846,6 +932,15 @@ function App() {
         {backupMessage ? <p className="sidebar-note">{backupMessage}</p> : null}
       </aside>
 
+      {operationError ? (
+        <div className="operation-error" role="alert">
+          <span>{operationError}</span>
+          <button type="button" onClick={() => setOperationError("")} aria-label="エラー通知を閉じる">
+            閉じる
+          </button>
+        </div>
+      ) : null}
+
       <main className={!isLogView ? "main-pane summary-pane" : "main-pane"}>
         {isSearchView ? (
           <section className="search-screen" aria-label="メモを検索">
@@ -873,6 +968,10 @@ function App() {
             <div className="search-result-list" aria-live="polite">
               {isSearchLoading ? (
                 <div className="empty-state">読み込み中...</div>
+              ) : searchLoadError ? (
+                <div className="empty-state data-error-state" role="alert">
+                  {searchLoadError}
+                </div>
               ) : searchResults.length === 0 ? (
                 <div className="empty-state">
                   {hasSearchQuery || hasFilter
@@ -948,6 +1047,10 @@ function App() {
             <div className="weekly-list" aria-live="polite">
               {isWeeklyLoading ? (
                 <div className="empty-state">読み込み中...</div>
+              ) : weeklyLoadError ? (
+                <div className="empty-state data-error-state" role="alert">
+                  {weeklyLoadError}
+                </div>
               ) : weeklyGroups.length === 0 ? (
                 <div className="empty-state">この週の記録はありません</div>
               ) : (
@@ -1018,6 +1121,10 @@ function App() {
         <section className="log-list" aria-live="polite">
           {isLoading ? (
             <div className="empty-state">読み込み中...</div>
+          ) : logLoadError ? (
+            <div className="empty-state data-error-state" role="alert">
+              {logLoadError}
+            </div>
           ) : logs.length === 0 ? (
             <div className="empty-state">{emptyMessage}</div>
           ) : (
