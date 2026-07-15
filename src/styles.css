@@ -610,15 +610,15 @@ h1 {
 .weekly-list {
   display: grid;
   align-content: start;
-  gap: 28px;
+  gap: 18px;
   overflow-y: auto;
-  padding: 24px clamp(20px, 5vw, 64px) 40px;
+  padding: 28px clamp(20px, 5vw, 64px) 40px;
 }
 
 .weekly-day {
   display: grid;
-  gap: 10px;
-  width: min(100%, 760px);
+  gap: 4px;
+  width: min(100%, 766px);
 }
 
 .weekly-day h2 {
@@ -626,39 +626,38 @@ h1 {
   color: #5f5e57;
   font-size: 14px;
   font-weight: 680;
+  line-height: 1.5;
+  padding-bottom: 2px;
 }
 
 .weekly-day-logs {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .weekly-log-item {
-  display: grid;
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid #e2e0d8;
-  border-radius: 10px;
-  background: #ffffff;
+  appearance: none;
+  border: 0;
+  border-bottom: 1px solid #eeede8;
+  border-radius: 0;
+  background: transparent;
   color: #252520;
-  padding: 14px 16px;
+  font: inherit;
   text-align: left;
+  cursor: pointer;
 }
 
 .weekly-log-item:hover {
-  border-color: #d2d0c8;
   background: #f7f7f4;
 }
 
-.weekly-log-item:focus-visible {
-  border-color: #8b8a82;
-  outline: 2px solid #eceae3;
-}
-
 .weekly-log-text {
-  line-height: 1.75;
+  display: block;
+  font-size: 16px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
+  padding: 1px 3px;
   white-space: pre-wrap;
 }
 
@@ -886,6 +885,7 @@ h1 {
 }
 
 .log-image {
+  display: block;
   margin: 0;
 }
 
@@ -895,6 +895,14 @@ h1 {
   max-height: 320px;
   border: 1px solid #e2e0d8;
   border-radius: 8px;
+  object-fit: contain;
+}
+
+.weekly-log-image img {
+  width: auto;
+  max-width: min(100%, 160px);
+  max-height: 100px;
+  border-radius: 6px;
   object-fit: contain;
 }
 
@@ -1406,12 +1414,8 @@ h1 {
   }
 
   .weekly-list {
-    gap: 24px;
-    padding: 20px 16px calc(32px + env(safe-area-inset-bottom));
-  }
-
-  .weekly-log-item {
-    padding: 13px 14px;
+    gap: 16px;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
   }
 
   .search-filter-tags {
@@ -1470,7 +1474,8 @@ h1 {
   }
 
   .inline-edit-trigger,
-  .inline-edit-textarea {
+  .inline-edit-textarea,
+  .weekly-log-text {
     line-height: 1.65;
   }
 
@@ -1482,6 +1487,12 @@ h1 {
     width: 100%;
     max-width: 100%;
     max-height: 360px;
+  }
+
+  .weekly-log-image img {
+    width: auto;
+    max-width: min(100%, 120px);
+    max-height: 80px;
   }
 
   .edit-tag-list {

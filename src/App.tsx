@@ -185,7 +185,12 @@ function formatSearchDateLabel(dateKey: string): string {
   return `${Number(month)}/${Number(day)}`;
 }
 
-function ImagePreview({ image }: { image: LogImage }) {
+type ImagePreviewProps = {
+  image: LogImage;
+  variant?: "default" | "weekly";
+};
+
+function ImagePreview({ image, variant = "default" }: ImagePreviewProps) {
   const [url, setUrl] = useState("");
 
   useEffect(() => {
@@ -200,9 +205,9 @@ function ImagePreview({ image }: { image: LogImage }) {
   }
 
   return (
-    <figure className="log-image">
+    <span className={variant === "weekly" ? "log-image weekly-log-image" : "log-image"}>
       <img alt={image.name} src={url} />
-    </figure>
+    </span>
   );
 }
 
@@ -1305,25 +1310,32 @@ function App() {
                     <div className="weekly-day-logs">
                       {group.logs.map((log) => (
                         <button
-                          className="weekly-log-item"
+                          className="log-entry weekly-log-item"
                           type="button"
                           key={log.id}
                           onClick={() => openSearchResult(log)}
                           aria-label={`${formatWeekDateHeading(log.date)}の${log.text || "画像メモ"}を日別画面で開く`}
                         >
-                          {log.tags.length > 0 ? (
-                            <span className="tag-list saved-tag-list" aria-label="タグ">
-                              {log.tags.map((tag) => (
-                                <span className="tag-chip" key={tag}>
-                                  {tag}
-                                </span>
+                          <span className="log-meta">
+                            <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
+                            {log.tags.length > 0 ? (
+                              <span className="tag-list saved-tag-list" aria-label="タグ">
+                                {log.tags.map((tag) => (
+                                  <span className="tag-chip" key={tag}>
+                                    {tag}
+                                  </span>
+                                ))}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="log-content">
+                            <span className="log-body">
+                              {log.text ? <span className="weekly-log-text">{log.text}</span> : null}
+                              {log.images.map((image) => (
+                                <ImagePreview image={image} key={image.id} variant="weekly" />
                               ))}
                             </span>
-                          ) : null}
-                          {log.text ? <span className="weekly-log-text">{log.text}</span> : null}
-                          {log.images.map((image) => (
-                            <ImagePreview image={image} key={image.id} />
-                          ))}
+                          </span>
                         </button>
                       ))}
                     </div>
