@@ -500,12 +500,7 @@ function App() {
   }
 
   function showRecordReview() {
-    if (!prepareToLeaveEditing()) {
-      closeMenu();
-      return;
-    }
-
-    setViewMode("review");
+    setIsRangePickerOpen(true);
     closeMenu();
   }
 
@@ -514,8 +509,14 @@ function App() {
   }
 
   function applyReviewRange(range: DateRange) {
+    if (!prepareToLeaveEditing()) {
+      setIsRangePickerOpen(false);
+      return;
+    }
+
     setReviewRange(range);
     saveReviewRange(range);
+    setViewMode("review");
     setIsRangePickerOpen(false);
   }
 
@@ -1307,17 +1308,10 @@ function App() {
                     <time dateTime={reviewRange.end}>{formatJapaneseDate(reviewRange.end)}</time>
                   </p>
                   <button type="button" onClick={openRangePicker}>
-                    期間を選ぶ
+                    期間を変更
                   </button>
                 </div>
-              ) : (
-                <div className="review-intro">
-                  <p>期間を選んで、記録を振り返りましょう</p>
-                  <button type="button" onClick={openRangePicker}>
-                    期間を選ぶ
-                  </button>
-                </div>
-              )}
+              ) : null}
             </header>
 
             <div className="review-list" aria-live="polite">
