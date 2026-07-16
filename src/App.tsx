@@ -7,23 +7,24 @@ import {
 import { getDataWriteErrorMessage } from "./dataError";
 import { db } from "./db";
 import {
+  formatDateHeading,
   formatDisplayDate,
+  formatJapaneseDate,
   formatShortDate,
   formatTime,
-  formatWeekDateHeading,
-  formatWeekRange,
-  getWeekStart,
+  isValidDateKey,
   offsetDateKey,
   toDateKey,
 } from "./date";
+import { RecordReviewCalendar, type DateRange } from "./RecordReviewCalendar";
 import type { LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
-const currentWeekStart = getWeekStart(todayKey);
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
 const maxImageSize = 1400;
 const imageQuality = 0.82;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
+const reviewRangeStorageKey = "baseball-note-record-review-range";
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
@@ -121,6 +122,41 @@ function sortLogsByDate(entries: StoredLogEntry[]): LogEntry[] {
     );
 }
 
+function loadSavedReviewRange(): DateRange | null {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(reviewRangeStorageKey) ?? "null");
+
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+
+    const range = parsed as Record<string, unknown>;
+
+    if (
+      typeof range.start !== "string" ||
+      typeof range.end !== "string" ||
+      !isValidDateKey(range.start) ||
+      !isValidDateKey(range.end) ||
+      range.start > range.end ||
+      range.end > todayKey
+    ) {
+      return null;
+    }
+
+    return { start: range.start, end: range.end };
+  } catch {
+    return null;
+  }
+}
+
+function saveReviewRange(range: DateRange): void {
+  try {
+    window.localStorage.setItem(reviewRangeStorageKey, JSON.stringify(range));
+  } catch {
+    // localStorageを使用できない環境でも、現在の画面では選択した期間を表示する。
+  }
+}
+
 function tagsAreEqual(firstTags: LogTag[], secondTags: LogTag[]): boolean {
   return (
     firstTags.length === secondTags.length &&
@@ -187,7 +223,7 @@ function formatSearchDateLabel(dateKey: string): string {
 
 type ImagePreviewProps = {
   image: LogImage;
-  variant?: "default" | "weekly";
+  variant?: "default" | "review";
 };
 
 function ImagePreview({ image, variant = "default" }: ImagePreviewProps) {
@@ -205,7 +241,7 @@ function ImagePreview({ image, variant = "default" }: ImagePreviewProps) {
   }
 
   return (
-    <span className={variant === "weekly" ? "log-image weekly-log-image" : "log-image"}>
+    <span className={variant === "review" ? "log-image review-log-image" : "log-image"}>
       <img alt={image.name} src={url} />
     </span>
   );
@@ -258,8 +294,9 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
-  const [weeklyLogs, setWeeklyLogs] = useState<LogEntry[]>([]);
-  const [weekStart, setWeekStart] = useState(currentWeekStart);
+  const [reviewLogs, setReviewLogs] = useState<LogEntry[]>([]);
+  const [reviewRange, setReviewRange] = useState<DateRange | null>(loadSavedReviewRange);
+  const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
@@ -268,15 +305,15 @@ function App() {
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
-  const [isWeeklyLoading, setIsWeeklyLoading] = useState(false);
+  const [isReviewLoading, setIsReviewLoading] = useState(false);
   const [logLoadError, setLogLoadError] = useState("");
   const [searchLoadError, setSearchLoadError] = useState("");
-  const [weeklyLoadError, setWeeklyLoadError] = useState("");
+  const [reviewLoadError, setReviewLoadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
   const [operationError, setOperationError] = useState("");
-  const [viewMode, setViewMode] = useState<"logs" | "search" | "weekly">("logs");
+  const [viewMode, setViewMode] = useState<"logs" | "search" | "review">("logs");
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -302,8 +339,7 @@ function App() {
   const normalizedSearchQuery = trimmedSearchQuery.toLowerCase();
   const isLogView = viewMode === "logs";
   const isSearchView = viewMode === "search";
-  const isWeeklyView = viewMode === "weekly";
-  const isCurrentWeek = weekStart === currentWeekStart;
+  const isReviewView = viewMode === "review";
   const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
@@ -342,17 +378,17 @@ function App() {
 
     return hasSearchQuery || hasFilter ? matchingLogs : matchingLogs.slice(0, 20);
   }, [hasFilter, hasSearchQuery, normalizedSearchQuery, searchLogs, selectedFilterTags]);
-  const weeklyGroups = useMemo(() => {
+  const reviewGroups = useMemo(() => {
     const groups = new Map<string, LogEntry[]>();
 
-    for (const log of weeklyLogs) {
+    for (const log of reviewLogs) {
       const dayLogs = groups.get(log.date) ?? [];
       dayLogs.push(log);
       groups.set(log.date, dayLogs);
     }
 
     return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
-  }, [weeklyLogs]);
+  }, [reviewLogs]);
 
   useEffect(() => {
     if (!editingLogId) {
@@ -463,15 +499,24 @@ function App() {
     closeMenu();
   }
 
-  function showWeeklyView() {
+  function showRecordReview() {
     if (!prepareToLeaveEditing()) {
       closeMenu();
       return;
     }
 
-    setWeekStart(currentWeekStart);
-    setViewMode("weekly");
+    setViewMode("review");
     closeMenu();
+  }
+
+  function openRangePicker() {
+    setIsRangePickerOpen(true);
+  }
+
+  function applyReviewRange(range: DateRange) {
+    setReviewRange(range);
+    saveReviewRange(range);
+    setIsRangePickerOpen(false);
   }
 
   function openSearchResult(log: LogEntry) {
@@ -486,13 +531,6 @@ function App() {
     }
 
     setSelectedDate((currentDate) => offsetDateKey(currentDate, offsetDays));
-  }
-
-  function moveWeek(offsetDays: number) {
-    setWeekStart((currentStart) => {
-      const nextStart = offsetDateKey(currentStart, offsetDays);
-      return nextStart > currentWeekStart ? currentStart : nextStart;
-    });
   }
 
   useEffect(() => {
@@ -574,43 +612,45 @@ function App() {
   useEffect(() => {
     let isActive = true;
 
-    async function loadWeeklyLogs() {
-      if (!isWeeklyView) {
-        setWeeklyLogs([]);
-        setWeeklyLoadError("");
-        setIsWeeklyLoading(false);
+    async function loadReviewLogs() {
+      if (!isReviewView || !reviewRange) {
+        setReviewLogs([]);
+        setReviewLoadError("");
+        setIsReviewLoading(false);
         return;
       }
 
-      setIsWeeklyLoading(true);
-      setWeeklyLoadError("");
+      setIsReviewLoading(true);
+      setReviewLoadError("");
 
       try {
-        const weekEnd = offsetDateKey(weekStart, 6);
-        const entries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
+        const entries = await db.logs
+          .where("date")
+          .between(reviewRange.start, reviewRange.end, true, true)
+          .toArray();
 
         if (isActive) {
-          setWeeklyLogs(sortLogsByDate(entries));
+          setReviewLogs(sortLogsByDate(entries));
         }
       } catch {
         if (isActive) {
-          setWeeklyLoadError(
-            "週間記録を読み込めませんでした。週間記録を開き直すか、画面を再読み込みしてください。",
+          setReviewLoadError(
+            "選択した期間の記録を読み込めませんでした。画面を開き直すか、再読み込みしてください。",
           );
         }
       } finally {
         if (isActive) {
-          setIsWeeklyLoading(false);
+          setIsReviewLoading(false);
         }
       }
     }
 
-    loadWeeklyLogs();
+    loadReviewLogs();
 
     return () => {
       isActive = false;
     };
-  }, [isWeeklyView, weekStart]);
+  }, [isReviewView, reviewRange]);
 
   useEffect(() => {
     if (!highlightedLogId || isLoading || !isLogView) {
@@ -815,7 +855,7 @@ function App() {
       setSearchLogs((currentLogs) =>
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
-      setWeeklyLogs((currentLogs) =>
+      setReviewLogs((currentLogs) =>
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
       cancelEditingLog(true, log.id);
@@ -838,7 +878,7 @@ function App() {
       await db.logs.delete(logId);
       setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
       setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
-      setWeeklyLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
+      setReviewLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
       return true;
     } catch {
       setOperationError(
@@ -973,10 +1013,12 @@ function App() {
         const allEntries = await db.logs.orderBy("createdAt").toArray();
         setSearchLogs(allEntries.map(normalizeLog).reverse());
       }
-      if (isWeeklyView) {
-        const weekEnd = offsetDateKey(weekStart, 6);
-        const weekEntries = await db.logs.where("date").between(weekStart, weekEnd, true, true).toArray();
-        setWeeklyLogs(sortLogsByDate(weekEntries));
+      if (isReviewView && reviewRange) {
+        const reviewEntries = await db.logs
+          .where("date")
+          .between(reviewRange.start, reviewRange.end, true, true)
+          .toArray();
+        setReviewLogs(sortLogsByDate(reviewEntries));
       }
       setBackupMessage(
         `${restoredLogs.length}件を読み込みました（新規${newCount}件、上書き${overwriteCount}件）。`,
@@ -1113,14 +1155,14 @@ function App() {
             />
           </label>
           <button
-            className={isWeeklyView ? "nav-item active" : "nav-item"}
+            className={isReviewView ? "nav-item active" : "nav-item"}
             type="button"
-            onClick={showWeeklyView}
+            onClick={showRecordReview}
           >
             <span className="nav-icon" aria-hidden="true">
-              週
+              振
             </span>
-            <span>週間記録</span>
+            <span>記録を振り返る</span>
           </button>
           <button
             className={isSearchView ? "nav-item active" : "nav-item"}
@@ -1253,68 +1295,57 @@ function App() {
               )}
             </div>
           </section>
-        ) : isWeeklyView ? (
-          <section className="weekly-screen" aria-label="週間記録">
-            <header className="weekly-header">
-              <h1>週間記録</h1>
-              <div className="weekly-navigator" aria-label="表示する週を移動">
-                <button
-                  className="weekly-nav-button"
-                  type="button"
-                  onClick={() => moveWeek(-7)}
-                  aria-label="前の週"
-                >
-                  <span aria-hidden="true">＜</span>
-                  <span>前の週</span>
-                </button>
-                <label className="weekly-date-picker">
-                  <span>{formatWeekRange(weekStart)}</span>
-                  <input
-                    type="date"
-                    value={weekStart}
-                    max={todayKey}
-                    onInput={(event) => {
-                      if (event.currentTarget.value && event.currentTarget.value <= todayKey) {
-                        setWeekStart(getWeekStart(event.currentTarget.value));
-                      }
-                    }}
-                    aria-label="週間記録の日付を選択"
-                  />
-                </label>
-                <button
-                  className="weekly-nav-button"
-                  type="button"
-                  onClick={() => moveWeek(7)}
-                  aria-label="次の週"
-                  disabled={isCurrentWeek}
-                >
-                  <span>次の週</span>
-                  <span aria-hidden="true">＞</span>
-                </button>
-              </div>
+        ) : isReviewView ? (
+          <section className="review-screen" aria-label="記録を振り返る">
+            <header className="review-header">
+              <h1>記録を振り返る</h1>
+              {reviewRange ? (
+                <div className="review-period">
+                  <p aria-label="表示中の期間">
+                    <time dateTime={reviewRange.start}>{formatJapaneseDate(reviewRange.start)}</time>
+                    <span aria-hidden="true">〜</span>
+                    <time dateTime={reviewRange.end}>{formatJapaneseDate(reviewRange.end)}</time>
+                  </p>
+                  <button type="button" onClick={openRangePicker}>
+                    期間を選ぶ
+                  </button>
+                </div>
+              ) : (
+                <div className="review-intro">
+                  <p>期間を選んで、記録を振り返りましょう</p>
+                  <button type="button" onClick={openRangePicker}>
+                    期間を選ぶ
+                  </button>
+                </div>
+              )}
             </header>
 
-            <div className="weekly-list" aria-live="polite">
-              {isWeeklyLoading ? (
+            <div className="review-list" aria-live="polite">
+              {!reviewRange ? null : isReviewLoading ? (
                 <div className="empty-state">読み込み中...</div>
-              ) : weeklyLoadError ? (
+              ) : reviewLoadError ? (
                 <div className="empty-state data-error-state" role="alert">
-                  {weeklyLoadError}
+                  {reviewLoadError}
                 </div>
-              ) : weeklyGroups.length === 0 ? (
-                <div className="empty-state">この週の記録はありません</div>
+              ) : reviewGroups.length === 0 ? (
+                <div className="empty-state review-empty-state">
+                  <p>この期間の記録はありません</p>
+                  <button type="button" onClick={openRangePicker}>
+                    期間を変更する
+                  </button>
+                </div>
               ) : (
-                weeklyGroups.map((group) => (
-                  <section className="weekly-day" key={group.date}>
-                    <h2>{formatWeekDateHeading(group.date)}</h2>
-                    <div className="weekly-day-logs">
+                reviewGroups.map((group) => (
+                  <section className="review-day" key={group.date}>
+                    <h2>{formatDateHeading(group.date)}</h2>
+                    <div className="review-day-logs">
                       {group.logs.map((log) => (
                         <button
-                          className="log-entry weekly-log-item"
+                          className="log-entry review-log-item"
                           type="button"
                           key={log.id}
                           onClick={() => openSearchResult(log)}
-                          aria-label={`${formatWeekDateHeading(log.date)}の${log.text || "画像メモ"}を日別画面で開く`}
+                          aria-label={`${formatDateHeading(log.date)}の${log.text || "画像メモ"}を日別画面で開く`}
                         >
                           <span className="log-meta">
                             <time dateTime={log.createdAt}>{formatTime(log.createdAt)}</time>
@@ -1330,9 +1361,9 @@ function App() {
                           </span>
                           <span className="log-content">
                             <span className="log-body">
-                              {log.text ? <span className="weekly-log-text">{log.text}</span> : null}
+                              {log.text ? <span className="review-log-text">{log.text}</span> : null}
                               {log.images.map((image) => (
-                                <ImagePreview image={image} key={image.id} variant="weekly" />
+                                <ImagePreview image={image} key={image.id} variant="review" />
                               ))}
                             </span>
                           </span>
@@ -1639,6 +1670,14 @@ function App() {
           </>
         )}
       </main>
+      {isRangePickerOpen ? (
+        <RecordReviewCalendar
+          currentRange={reviewRange}
+          maxDate={todayKey}
+          onApply={applyReviewRange}
+          onCancel={() => setIsRangePickerOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
