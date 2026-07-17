@@ -65,7 +65,6 @@ button:disabled {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
   color: #272722;
   font-size: 15px;
   font-weight: 650;
@@ -75,16 +74,6 @@ button:disabled {
 .mobile-context-heading,
 .mobile-date-controls {
   display: none;
-}
-
-.brand-mark {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid #d8d6ce;
-  border-radius: 8px;
-  background: #ffffff;
 }
 
 .menu-button,
@@ -126,48 +115,28 @@ button:disabled {
   gap: 8px;
 }
 
-.nav-item,
-.date-picker {
+.nav-item {
   width: 100%;
+  min-height: 48px;
   border: 0;
   border-radius: 8px;
   background: transparent;
   color: #36362f;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
   padding: 10px 12px;
   text-align: left;
   touch-action: manipulation;
 }
 
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.nav-icon {
-  display: inline-grid;
-  flex: 0 0 18px;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  color: #6a6960;
-  font-size: 15px;
-  font-weight: 650;
-  line-height: 1;
-}
-
-.nav-item.active .nav-icon {
-  color: #33322d;
-}
-
-.nav-item:hover:not(:disabled),
-.date-picker:hover {
+.nav-item:hover:not(:disabled) {
   background: #e7e5de;
 }
 
 .nav-item.active {
-  background: #ffffff;
-  box-shadow: inset 0 0 0 1px #dfddd5;
+  color: #20201c;
+  font-weight: 650;
 }
 
 .nav-item:disabled {
@@ -222,32 +191,6 @@ button:disabled {
 
 .operation-error button:hover {
   background: #f8e9e6;
-}
-
-.date-picker {
-  display: grid;
-  gap: 8px;
-}
-
-.date-picker-label {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.date-picker-label span:last-child {
-  color: #5f5e57;
-  font-size: 13px;
-}
-
-.date-picker input {
-  width: 100%;
-  min-width: 136px;
-  border: 1px solid #d8d6ce;
-  border-radius: 8px;
-  background: #ffffff;
-  color: #2d2d28;
-  padding: 8px;
 }
 
 .main-pane {
@@ -1421,8 +1364,7 @@ h1 {
   padding: 11px 13px;
 }
 
-.composer textarea:focus,
-.date-picker input:focus {
+.composer textarea:focus {
   border-color: #8b8a82;
   outline: 2px solid #eceae3;
 }
@@ -1623,16 +1565,10 @@ h1 {
     gap: 10px;
   }
 
-  .nav-item,
-  .date-picker {
+  .nav-item {
     width: 100%;
     min-height: 48px;
     white-space: normal;
-  }
-
-  .date-picker {
-    grid-template-columns: 1fr;
-    align-items: stretch;
   }
 
   .main-pane {

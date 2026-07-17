@@ -1100,7 +1100,6 @@ function App() {
       <aside className={isMenuOpen ? "sidebar menu-open" : "sidebar"} id="app-menu" aria-label="メニュー">
         <div className="sidebar-top">
           <div className="brand">
-            <span className="brand-mark">B</span>
             <span>Baseball Note</span>
           </div>
           <button className="menu-close-button" type="button" onClick={closeMenu} aria-label="メニューを閉じる">
@@ -1110,70 +1109,18 @@ function App() {
 
         <nav className="nav-list">
           <button
-            className={isLogView && isToday ? "nav-item active" : "nav-item"}
-            type="button"
-            onClick={() => {
-              if (!prepareToLeaveEditing()) {
-                closeMenu();
-                return;
-              }
-
-              setSelectedDate(todayKey);
-              showLogView();
-              closeMenu();
-            }}
-          >
-            <span className="nav-icon" aria-hidden="true">
-              ○
-            </span>
-            <span>今日</span>
-          </button>
-          <label className="date-picker">
-            <span className="date-picker-label">
-              <span className="nav-icon" aria-hidden="true">
-                □
-              </span>
-              <span>日付</span>
-            </span>
-            <input
-              type="date"
-              value={selectedDate}
-              max={todayKey}
-              onChange={(event) => {
-                if (event.target.value > todayKey) {
-                  return;
-                }
-
-                if (!prepareToLeaveEditing()) {
-                  closeMenu();
-                  return;
-                }
-
-                setSelectedDate(event.target.value);
-                showLogView();
-                closeMenu();
-              }}
-            />
-          </label>
-          <button
             className={isReviewView ? "nav-item active" : "nav-item"}
             type="button"
             onClick={showRecordReview}
           >
-            <span className="nav-icon" aria-hidden="true">
-              振
-            </span>
-            <span>記録を振り返る</span>
+            振り返り
           </button>
           <button
             className={isSearchView ? "nav-item active" : "nav-item"}
             type="button"
             onClick={showSearchView}
           >
-            <span className="nav-icon" aria-hidden="true">
-              ⌕
-            </span>
-            <span>検索</span>
+            検索
           </button>
           <button
             className="nav-item"
@@ -1183,10 +1130,7 @@ function App() {
               closeMenu();
             }}
           >
-            <span className="nav-icon" aria-hidden="true">
-              ↓
-            </span>
-            <span>バックアップ</span>
+            バックアップ
           </button>
           <button
             className="nav-item"
@@ -1201,10 +1145,7 @@ function App() {
               closeMenu();
             }}
           >
-            <span className="nav-icon" aria-hidden="true">
-              ↑
-            </span>
-            <span>読み込み</span>
+            読み込み
           </button>
           <input
             ref={importInputRef}
