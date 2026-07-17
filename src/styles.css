@@ -73,22 +73,10 @@ button:disabled {
 }
 
 .brand-mark {
-  display: grid;
+  display: block;
   flex: 0 0 28px;
   width: 28px;
   height: 28px;
-  place-items: center;
-  clip-path: polygon(7% 0, 93% 0, 93% 57%, 50% 100%, 7% 57%);
-  background: #31312c;
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -0.04em;
-}
-
-.brand-mark span {
-  transform: translateY(-1px);
 }
 
 .brand-title {

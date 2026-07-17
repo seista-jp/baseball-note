@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Baseball Note logo</title>
+  <desc id="desc">Rounded home plate outline with a capital B.</desc>
+
+  <!-- Home plate -->
+  <path
+    d="M132 72
+       H380
+       Q412 72 412 104
+       V248
+       Q412 266 398 280
+       L279 400
+       Q256 423 233 400
+       L114 280
+       Q100 266 100 248
+       V104
+       Q100 72 132 72
+       Z"
+    fill="none"
+    stroke="#000"
+    stroke-width="24"
+    stroke-linejoin="round"
+  />
+
+  <!-- Letter B, drawn as vector strokes -->
+  <path
+    d="M210 156
+       V356
+       M210 156
+       H276
+       Q332 156 332 206
+       Q332 256 276 256
+       H210
+       M210 256
+       H286
+       Q346 256 346 306
+       Q346 356 286 356
+       H210"
+    fill="none"
+    stroke="#000"
+    stroke-width="24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

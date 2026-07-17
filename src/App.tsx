@@ -1103,9 +1103,7 @@ function App() {
       <aside className={isMenuOpen ? "sidebar menu-open" : "sidebar"} id="app-menu" aria-label="メニュー">
         <div className="sidebar-top">
           <div className="brand">
-            <span className="brand-mark" aria-hidden="true">
-              <span>B</span>
-            </span>
+            <img src="/baseball-note-logo.svg" alt="" className="brand-mark" />
             <span className="brand-title">Baseball Note</span>
           </div>
           <button className="menu-close-button" type="button" onClick={closeMenu} aria-label="メニューを閉じる">
