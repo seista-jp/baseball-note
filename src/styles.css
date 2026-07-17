@@ -49,7 +49,7 @@ button:disabled {
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 24px;
   border-right: 1px solid #e4e3de;
   background: #f1f0ec;
   padding: 20px 14px;
@@ -65,9 +65,34 @@ button:disabled {
 .brand {
   display: flex;
   align-items: center;
+  gap: 10px;
   color: #272722;
   font-size: 15px;
   font-weight: 650;
+  line-height: 1.3;
+}
+
+.brand-mark {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  clip-path: polygon(7% 0, 93% 0, 93% 57%, 50% 100%, 7% 57%);
+  background: #31312c;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.brand-mark span {
+  transform: translateY(-1px);
+}
+
+.brand-title {
+  white-space: nowrap;
 }
 
 .mobile-brand-title,
@@ -112,31 +137,51 @@ button:disabled {
 
 .nav-list {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   min-height: 48px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: #36362f;
   font-size: 15px;
   font-weight: 500;
-  line-height: 1.5;
-  padding: 10px 12px;
+  line-height: 1.4;
+  padding: 12px;
   text-align: left;
   touch-action: manipulation;
 }
 
 .nav-item:hover:not(:disabled) {
-  background: #e7e5de;
+  background: #e6e4dd;
 }
 
 .nav-item.active {
+  background: #e3e1da;
   color: #20201c;
   font-weight: 650;
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid #77756c;
+  outline-offset: -2px;
+}
+
+.nav-item-icon {
+  flex: 0 0 21px;
+  width: 21px;
+  height: 21px;
+  opacity: 0.88;
+}
+
+.nav-item.active .nav-item-icon {
+  opacity: 1;
 }
 
 .nav-item:disabled {

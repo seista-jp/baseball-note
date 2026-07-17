@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { CalendarDays, Download, Search, Upload } from "lucide-react";
 import {
   BackupValidationError,
   validateBackup,
@@ -23,6 +24,8 @@ const todayKey = toDateKey(new Date());
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
 const maxImageSize = 1400;
 const imageQuality = 0.82;
+const menuIconSize = 21;
+const menuIconStrokeWidth = 1.8;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 
@@ -1100,7 +1103,10 @@ function App() {
       <aside className={isMenuOpen ? "sidebar menu-open" : "sidebar"} id="app-menu" aria-label="メニュー">
         <div className="sidebar-top">
           <div className="brand">
-            <span>Baseball Note</span>
+            <span className="brand-mark" aria-hidden="true">
+              <span>B</span>
+            </span>
+            <span className="brand-title">Baseball Note</span>
           </div>
           <button className="menu-close-button" type="button" onClick={closeMenu} aria-label="メニューを閉じる">
             閉じる
@@ -1113,14 +1119,26 @@ function App() {
             type="button"
             onClick={showRecordReview}
           >
-            振り返り
+            <CalendarDays
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>振り返り</span>
           </button>
           <button
             className={isSearchView ? "nav-item active" : "nav-item"}
             type="button"
             onClick={showSearchView}
           >
-            検索
+            <Search
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>検索</span>
           </button>
           <button
             className="nav-item"
@@ -1130,7 +1148,13 @@ function App() {
               closeMenu();
             }}
           >
-            バックアップ
+            <Download
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>バックアップ</span>
           </button>
           <button
             className="nav-item"
@@ -1145,7 +1169,13 @@ function App() {
               closeMenu();
             }}
           >
-            読み込み
+            <Upload
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>読み込み</span>
           </button>
           <input
             ref={importInputRef}
