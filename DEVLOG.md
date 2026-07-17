@@ -59,6 +59,39 @@
 
 新しい作業は、この章の先頭に新しい日付の記録を追加します。同じ日に複数回作業した場合は、時刻または短い作業名を見出しに加えます。未実施の内容を「実施内容」や「確認結果」に書かず、次回へ持ち越す内容は「残っている問題」または「次回やること」に記載します。
 
+### 2026-07-17: ロゴのGitHub Pagesサブパス対応
+
+#### 実施内容
+
+- 公開中のGitHub Pagesでロゴが壊れた画像になる原因を確認しました。`/baseball-note-logo.svg` はドメイン直下の `https://seista-jp.github.io/baseball-note-logo.svg` へ解決され、GitHub Pagesの404になっていました。
+- `public/baseball-note-logo.svg` が小文字・ハイフンを含めて指定名と完全一致し、SVGファイルとして存在することを確認しました。
+- `vite.config.js` の `base: "./"` に合わせ、ロゴの読み込みを `${import.meta.env.BASE_URL}baseball-note-logo.svg` へ変更しました。
+- PWAアイコン、Manifest、favicon、Service Worker、ロゴの寸法とレイアウトは変更していません。
+
+#### 変更したファイル
+
+- `src/App.tsx`
+- `DEVLOG.md`
+- `TODO.md`
+
+#### 確認結果
+
+- `npm exec tsc -- --noEmit`: 成功
+- `npm run build`: 成功（Viteで1,793モジュールを変換）
+- ビルド済みJavaScriptではロゴURLが `./baseball-note-logo.svg` になり、`public` のSVGと同一内容の `dist/baseball-note-logo.svg` が生成されることを確認しました。
+- ローカル開発環境 `http://127.0.0.1:5173/` では `http://127.0.0.1:5173/baseball-note-logo.svg` から読み込まれ、28×28pxで表示されました。
+- GitHub Pages相当のサブパス `http://127.0.0.1:4173/baseball-note/` では `http://127.0.0.1:4173/baseball-note/baseball-note-logo.svg` から読み込まれ、28×28pxで表示されました。
+- ローカル開発環境とサブパス環境のブラウザコンソールに警告・エラーはありませんでした。
+
+#### 残っている問題
+
+- 修正版は未コミット・未プッシュのため、実際のGitHub Pagesでの修正後表示はまだ確認できません。コミット・PushとGitHub Actionsのデプロイ後に最終確認が必要です。
+
+#### 次回やること
+
+- 利用者のローカル確認後、指示を受けてコミット・Pushします。
+- デプロイ後、公開URLが `https://seista-jp.github.io/baseball-note/baseball-note-logo.svg` へ解決され、ロゴが表示されることを確認します。
+
 ### 2026-07-17: オリジナルロゴをサイドメニューへ反映
 
 #### 実施内容

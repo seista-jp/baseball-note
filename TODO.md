@@ -66,6 +66,11 @@
 
 ## 完了した項目
 
+- [x] **ロゴの読み込みをGitHub Pagesのサブパスへ対応する**（2026-07-17）
+  - 完了内容: ドメイン直下を指していた `/baseball-note-logo.svg` を `${import.meta.env.BASE_URL}baseball-note-logo.svg` へ変更し、`base: "./"` に沿った相対URLで読み込むようにした
+  - 確認結果: 型チェックとプロダクションビルドが成功し、ローカルのルート配信とGitHub Pages相当の `/baseball-note/` 配信でロゴ画像の読込・28px表示・コンソールエラーがないことを確認した
+  - 残る確認: 修正版のコミット・PushとGitHub Actionsのデプロイ後に、実際の公開URLで最終確認する
+
 - [x] **オリジナルロゴをサイドメニューへ反映する**（2026-07-17）
   - 完了内容: CSS製の「ホームベース×B」仮ロゴを `public/baseball-note-logo.svg` の画像表示へ置き換え、PCサイドバーとスマートフォンのドロワーで28px・文字との間隔10px・縦中央揃えを維持した
   - 変更対象外: `icon.svg`、`icon-192.png`、`icon-512.png`、`manifest.webmanifest`、favicon指定は変更していない
