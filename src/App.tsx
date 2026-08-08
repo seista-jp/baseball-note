@@ -28,6 +28,36 @@ const menuIconSize = 21;
 const menuIconStrokeWidth = 1.8;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
+const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
+const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球の記録です。
+記録だけを根拠に、次の観点から振り返りを整理してください。
+
+1. この期間で一番大きかった気づき
+2. 記録の全体傾向
+3. 繰り返し出ているテーマ
+4. カテゴリーをまたぐ共通点
+5. 考え方の変化・発展
+6. 矛盾しているように見える記録
+7. 今後追いかける価値があるテーマ
+8. 次に試すこと
+9. この期間の自分の野球観
+
+分析するときは、次の条件を守ってください。
+
+- 記録にない内容を事実のように追加しない
+- 元メモの表現と意図をできるだけ尊重する
+- 無理に結論を出さない
+- 記録だけでは分からない場合は、「まだ判断できない」「今後確認が必要」としてよい
+- 医学・科学的な正誤判定より、まず本人の記録内にある傾向を分析する
+
+分析結果は、1〜9の見出しに分けて整理してください。`;
+
+type ReviewTagFilter = (typeof reviewTagFilters)[number];
+
+type ReviewCopyStatus = {
+  kind: "success" | "error";
+  message: string;
+};
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
@@ -157,6 +187,53 @@ function saveReviewRange(range: DateRange): void {
     window.localStorage.setItem(reviewRangeStorageKey, JSON.stringify(range));
   } catch {
     // localStorageを使用できない環境でも、現在の画面では選択した期間を表示する。
+  }
+}
+
+function buildAiAnalysisText(
+  range: DateRange,
+  selectedTag: ReviewTagFilter,
+  entries: LogEntry[],
+): string {
+  const records = entries
+    .map((log) => {
+      const tagLabel = log.tags.length > 0 ? log.tags.join("・") : "その他";
+      return `【${log.date}｜${tagLabel}】\n${log.text}`;
+    })
+    .join("\n\n");
+
+  return `${aiAnalysisPrompt}\n\n【対象期間】\n${range.start}〜${range.end}\n\n【対象タグ】\n${selectedTag}\n\n【Baseball Note記録】\n${records}`;
+}
+
+async function copyTextToClipboard(textToCopy: string): Promise<void> {
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(textToCopy);
+      return;
+    }
+  } catch {
+    // Clipboard APIを利用できない場合は、従来のコピー操作へ切り替える。
+  }
+
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = textToCopy;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, textToCopy.length);
+
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("クリップボードへコピーできませんでした。");
+    }
+  } finally {
+    textarea.remove();
+    activeElement?.focus();
   }
 }
 
@@ -299,6 +376,8 @@ function App() {
   const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
   const [reviewLogs, setReviewLogs] = useState<LogEntry[]>([]);
   const [reviewRange, setReviewRange] = useState<DateRange | null>(loadSavedReviewRange);
+  const [reviewTagFilter, setReviewTagFilter] = useState<ReviewTagFilter>("すべて");
+  const [reviewCopyStatus, setReviewCopyStatus] = useState<ReviewCopyStatus | null>(null);
   const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -381,17 +460,32 @@ function App() {
 
     return hasSearchQuery || hasFilter ? matchingLogs : matchingLogs.slice(0, 20);
   }, [hasFilter, hasSearchQuery, normalizedSearchQuery, searchLogs, selectedFilterTags]);
+  const filteredReviewLogs = useMemo(() => {
+    if (reviewTagFilter === "すべて") {
+      return reviewLogs;
+    }
+
+    if (reviewTagFilter === "その他") {
+      return reviewLogs.filter((log) => log.tags.length === 0);
+    }
+
+    return reviewLogs.filter((log) => log.tags.includes(reviewTagFilter));
+  }, [reviewLogs, reviewTagFilter]);
   const reviewGroups = useMemo(() => {
     const groups = new Map<string, LogEntry[]>();
 
-    for (const log of reviewLogs) {
+    for (const log of filteredReviewLogs) {
       const dayLogs = groups.get(log.date) ?? [];
       dayLogs.push(log);
       groups.set(log.date, dayLogs);
     }
 
     return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
-  }, [reviewLogs]);
+  }, [filteredReviewLogs]);
+
+  useEffect(() => {
+    setReviewCopyStatus(null);
+  }, [reviewLogs, reviewRange, reviewTagFilter]);
 
   useEffect(() => {
     if (!editingLogId) {
@@ -517,6 +611,10 @@ function App() {
       return;
     }
 
+    setReviewLogs([]);
+    setReviewLoadError("");
+    setIsReviewLoading(true);
+    setReviewCopyStatus(null);
     setReviewRange(range);
     saveReviewRange(range);
     setViewMode("review");
@@ -774,6 +872,34 @@ function App() {
         ? currentTags.filter((currentTag) => currentTag !== tag)
         : [...currentTags, tag],
     );
+  }
+
+  function selectReviewTagFilter(tagFilter: ReviewTagFilter) {
+    setReviewTagFilter(tagFilter);
+    setReviewCopyStatus(null);
+  }
+
+  async function handleCopyReviewForAi() {
+    if (!reviewRange || filteredReviewLogs.length === 0 || isReviewLoading || reviewLoadError) {
+      return;
+    }
+
+    setReviewCopyStatus(null);
+
+    try {
+      await copyTextToClipboard(
+        buildAiAnalysisText(reviewRange, reviewTagFilter, filteredReviewLogs),
+      );
+      setReviewCopyStatus({
+        kind: "success",
+        message: "AI分析用の記録をコピーしました",
+      });
+    } catch {
+      setReviewCopyStatus({
+        kind: "error",
+        message: "コピーできませんでした。ブラウザのクリップボード権限を確認してください。",
+      });
+    }
   }
 
   function startEditingLog(log: LogEntry): boolean {
@@ -1270,16 +1396,59 @@ function App() {
             <header className="review-header">
               <h1>記録を振り返る</h1>
               {reviewRange ? (
-                <div className="review-period">
-                  <p aria-label="表示中の期間">
-                    <time dateTime={reviewRange.start}>{formatJapaneseDate(reviewRange.start)}</time>
-                    <span aria-hidden="true">〜</span>
-                    <time dateTime={reviewRange.end}>{formatJapaneseDate(reviewRange.end)}</time>
-                  </p>
-                  <button type="button" onClick={openRangePicker}>
-                    期間を変更
-                  </button>
-                </div>
+                <>
+                  <div className="review-period">
+                    <p aria-label="表示中の期間">
+                      <time dateTime={reviewRange.start}>{formatJapaneseDate(reviewRange.start)}</time>
+                      <span aria-hidden="true">〜</span>
+                      <time dateTime={reviewRange.end}>{formatJapaneseDate(reviewRange.end)}</time>
+                    </p>
+                    <button type="button" onClick={openRangePicker}>
+                      期間を変更
+                    </button>
+                  </div>
+                  <div className="review-filter">
+                    <span className="review-filter-label">タグ</span>
+                    <div className="review-filter-options" aria-label="振り返りをタグで絞り込み">
+                      {reviewTagFilters.map((tagFilter) => {
+                        const isSelected = reviewTagFilter === tagFilter;
+
+                        return (
+                          <button
+                            className={isSelected ? "review-tag-button selected" : "review-tag-button"}
+                            type="button"
+                            key={tagFilter}
+                            onClick={() => selectReviewTagFilter(tagFilter)}
+                            aria-pressed={isSelected}
+                          >
+                            {tagFilter}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="review-copy-row">
+                    <span>対象 {filteredReviewLogs.length}件</span>
+                    <button
+                      className="review-copy-button"
+                      type="button"
+                      onClick={handleCopyReviewForAi}
+                      disabled={
+                        filteredReviewLogs.length === 0 || isReviewLoading || Boolean(reviewLoadError)
+                      }
+                    >
+                      AI用にコピー
+                    </button>
+                  </div>
+                  {reviewCopyStatus ? (
+                    <p
+                      className={`review-copy-status ${reviewCopyStatus.kind}`}
+                      role={reviewCopyStatus.kind === "error" ? "alert" : "status"}
+                    >
+                      {reviewCopyStatus.message}
+                    </p>
+                  ) : null}
+                </>
               ) : null}
             </header>
 
@@ -1292,10 +1461,20 @@ function App() {
                 </div>
               ) : reviewGroups.length === 0 ? (
                 <div className="empty-state review-empty-state">
-                  <p>この期間の記録はありません</p>
-                  <button type="button" onClick={openRangePicker}>
-                    期間を変更する
-                  </button>
+                  <p>
+                    {reviewLogs.length === 0
+                      ? "この期間の記録はありません"
+                      : `この期間の「${reviewTagFilter}」記録はありません`}
+                  </p>
+                  {reviewLogs.length === 0 ? (
+                    <button type="button" onClick={openRangePicker}>
+                      期間を変更する
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => selectReviewTagFilter("すべて")}>
+                      すべて表示
+                    </button>
+                  )}
                 </div>
               ) : (
                 reviewGroups.map((group) => (
