@@ -40,11 +40,12 @@
 利用者の記録を最優先で保護します。次の項目は既存データとの契約として扱います。
 
 - Dexieのデータベース名: `baseballNote`
-- テーブル名: `logs`
-- 現在のIndexedDBスキーマ: バージョン1、`id, date, createdAt` のインデックス
+- テーブル名: 通常メモの `logs`、AI分析の `aiAnalyses`
+- 現在のIndexedDBスキーマ: バージョン2。`logs` は既存の `id, date, createdAt`、`aiAnalyses` は `id, createdAt` のインデックス
 - メモの基本項目: `id`、`date`、`createdAt`、`text`、`images`、`tags`
-- バックアップ形式: バージョン1のJSON
-- 既存バックアップで省略された画像とタグを空配列として補完する互換処理
+- AI分析の基本項目: `id`、`startDate`、`endDate`、`tag`、`text`、`createdAt`
+- バックアップ形式: 新規書き出しはバージョン2のJSON。バージョン1と2を読み込み可能
+- 既存バックアップで省略された画像とタグを空配列として補完し、バージョン1で省略されたAI分析を空配列として扱う互換処理
 - 振り返り期間のlocalStorageキー: `baseball-note-record-review-range`
 - 本文の直接編集案内のlocalStorageキー: `baseball-note-inline-edit-hint-dismissed`
 

@@ -1,7 +1,9 @@
-import type { LogEntry, LogImage, LogTag } from "./types";
+import type { AiAnalysis, AiAnalysisTag, LogEntry, LogImage, LogTag } from "./types";
 
-const backupVersion = 1;
+const currentBackupVersion = 2;
+const supportedBackupVersions = [1, currentBackupVersion] as const;
 const validTags: readonly LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
+const validAiAnalysisTags: readonly AiAnalysisTag[] = ["すべて", ...validTags, "その他"];
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const datePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 const dateTimePattern =
@@ -17,8 +19,9 @@ export type BackupLogEntry = Omit<LogEntry, "images"> & {
 };
 
 export type BackupFile = {
-  version: typeof backupVersion;
+  version: (typeof supportedBackupVersions)[number];
   logs: BackupLogEntry[];
+  aiAnalyses: AiAnalysis[];
 };
 
 export class BackupValidationError extends Error {
@@ -26,6 +29,13 @@ export class BackupValidationError extends Error {
     super(message);
     this.name = "BackupValidationError";
   }
+}
+
+export function buildBackupFile(
+  logs: BackupLogEntry[],
+  aiAnalyses: AiAnalysis[],
+): BackupFile {
+  return { version: currentBackupVersion, logs, aiAnalyses };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -106,6 +116,14 @@ function validateTags(value: unknown, fieldName: string): LogTag[] {
   return [...new Set(tags)];
 }
 
+function validateAiAnalysisTag(value: unknown, fieldName: string): AiAnalysisTag {
+  if (typeof value !== "string" || !validAiAnalysisTags.includes(value as AiAnalysisTag)) {
+    throw new BackupValidationError(`${fieldName}が正しくありません。`);
+  }
+
+  return value as AiAnalysisTag;
+}
+
 function validateImage(value: unknown, fieldName: string): BackupImage {
   if (!isObject(value)) {
     throw new BackupValidationError(`${fieldName}が正しくありません。`);
@@ -165,15 +183,43 @@ function validateLog(value: unknown, index: number): BackupLogEntry {
   };
 }
 
+function validateAiAnalysis(value: unknown, index: number): AiAnalysis {
+  const fieldName = `${index + 1}件目のAI分析`;
+
+  if (!isObject(value)) {
+    throw new BackupValidationError(`${fieldName}が正しくありません。`);
+  }
+
+  const startDate = validateDate(value.startDate, `${fieldName}の開始日`);
+  const endDate = validateDate(value.endDate, `${fieldName}の終了日`);
+  const createdAt = validateDateTime(value.createdAt, `${fieldName}の保存日時`);
+
+  if (startDate > endDate) {
+    throw new BackupValidationError(`${fieldName}の期間が正しくありません。`);
+  }
+
+  return {
+    id: validateId(value.id, `${fieldName}のID`),
+    startDate,
+    endDate,
+    tag: validateAiAnalysisTag(value.tag, `${fieldName}のタグ`),
+    text: requireString(value.text, `${fieldName}の本文`),
+    createdAt: new Date(createdAt).toISOString(),
+  };
+}
+
 export function validateBackup(value: unknown): BackupFile {
   if (!isObject(value)) {
     throw new BackupValidationError("バックアップ全体の形式が正しくありません。");
   }
 
-  if (value.version !== backupVersion) {
+  if (
+    typeof value.version !== "number" ||
+    !supportedBackupVersions.includes(value.version as BackupFile["version"])
+  ) {
     const versionLabel = typeof value.version === "number" ? String(value.version) : "不明";
     throw new BackupValidationError(
-      `バックアップのバージョン${versionLabel}には対応していません。対応版は1です。`,
+      `バックアップのバージョン${versionLabel}には対応していません。対応版は1と2です。`,
     );
   }
 
@@ -181,8 +227,17 @@ export function validateBackup(value: unknown): BackupFile {
     throw new BackupValidationError("メモの一覧が見つかりません。");
   }
 
+  const rawAiAnalyses =
+    value.version === 1 && value.aiAnalyses === undefined ? [] : value.aiAnalyses;
+
+  if (!Array.isArray(rawAiAnalyses)) {
+    throw new BackupValidationError("AI分析の一覧が正しくありません。");
+  }
+
   const logs = value.logs.map(validateLog);
+  const aiAnalyses = rawAiAnalyses.map(validateAiAnalysis);
   const logIds = new Set<string>();
+  const aiAnalysisIds = new Set<string>();
 
   for (const log of logs) {
     if (logIds.has(log.id)) {
@@ -192,5 +247,13 @@ export function validateBackup(value: unknown): BackupFile {
     logIds.add(log.id);
   }
 
-  return { version: backupVersion, logs };
+  for (const analysis of aiAnalyses) {
+    if (aiAnalysisIds.has(analysis.id)) {
+      throw new BackupValidationError(`AI分析ID「${analysis.id}」が重複しています。`);
+    }
+
+    aiAnalysisIds.add(analysis.id);
+  }
+
+  return { version: value.version as BackupFile["version"], logs, aiAnalyses };
 }

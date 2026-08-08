@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { CalendarDays, Download, Search, Upload } from "lucide-react";
+import { CalendarDays, Download, FileText, Search, Upload } from "lucide-react";
 import {
   BackupValidationError,
+  buildBackupFile,
   validateBackup,
   type BackupLogEntry,
 } from "./backup";
@@ -18,7 +19,7 @@ import {
   toDateKey,
 } from "./date";
 import { RecordReviewCalendar, type DateRange } from "./RecordReviewCalendar";
-import type { LogEntry, LogImage, LogTag } from "./types";
+import type { AiAnalysis, AiAnalysisTag, LogEntry, LogImage, LogTag } from "./types";
 
 const todayKey = toDateKey(new Date());
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
@@ -53,6 +54,7 @@ const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球�
 分析結果は、1〜9の見出しに分けて整理してください。`;
 
 type ReviewTagFilter = (typeof reviewTagFilters)[number];
+type AiAnalysisScreen = "list" | "save" | "detail";
 
 type ReviewCopyStatus = {
   kind: "success" | "error";
@@ -153,6 +155,18 @@ function sortLogsByDate(entries: StoredLogEntry[]): LogEntry[] {
         ? first.createdAt.localeCompare(second.createdAt)
         : first.date.localeCompare(second.date),
     );
+}
+
+function sortAiAnalysesNewest(entries: AiAnalysis[]): AiAnalysis[] {
+  return [...entries].sort((first, second) => second.createdAt.localeCompare(first.createdAt));
+}
+
+function formatSavedDate(dateTime: string): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(new Date(dateTime));
 }
 
 function loadSavedReviewRange(): DateRange | null {
@@ -378,6 +392,15 @@ function App() {
   const [reviewRange, setReviewRange] = useState<DateRange | null>(loadSavedReviewRange);
   const [reviewTagFilter, setReviewTagFilter] = useState<ReviewTagFilter>("すべて");
   const [reviewCopyStatus, setReviewCopyStatus] = useState<ReviewCopyStatus | null>(null);
+  const [aiAnalyses, setAiAnalyses] = useState<AiAnalysis[]>([]);
+  const [aiAnalysisScreen, setAiAnalysisScreen] = useState<AiAnalysisScreen>("list");
+  const [selectedAiAnalysis, setSelectedAiAnalysis] = useState<AiAnalysis | null>(null);
+  const [aiAnalysisStartDate, setAiAnalysisStartDate] = useState(reviewRange?.start ?? todayKey);
+  const [aiAnalysisEndDate, setAiAnalysisEndDate] = useState(reviewRange?.end ?? todayKey);
+  const [aiAnalysisTag, setAiAnalysisTag] = useState<AiAnalysisTag>("すべて");
+  const [aiAnalysisText, setAiAnalysisText] = useState("");
+  const [aiAnalysisFormMessage, setAiAnalysisFormMessage] = useState("");
+  const [aiAnalysisNotice, setAiAnalysisNotice] = useState("");
   const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
   const [text, setText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -388,14 +411,19 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
+  const [isAiAnalysisLoading, setIsAiAnalysisLoading] = useState(false);
   const [logLoadError, setLogLoadError] = useState("");
   const [searchLoadError, setSearchLoadError] = useState("");
   const [reviewLoadError, setReviewLoadError] = useState("");
+  const [aiAnalysisLoadError, setAiAnalysisLoadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingAiAnalysis, setIsSavingAiAnalysis] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
   const [operationError, setOperationError] = useState("");
-  const [viewMode, setViewMode] = useState<"logs" | "search" | "review">("logs");
+  const [viewMode, setViewMode] = useState<"logs" | "search" | "review" | "ai-analysis">(
+    "logs",
+  );
   const [highlightedLogId, setHighlightedLogId] = useState<string | null>(null);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -422,6 +450,10 @@ function App() {
   const isLogView = viewMode === "logs";
   const isSearchView = viewMode === "search";
   const isReviewView = viewMode === "review";
+  const isAiAnalysisView = viewMode === "ai-analysis";
+  const hasUnsavedAiAnalysisDraft = Boolean(
+    isAiAnalysisView && aiAnalysisScreen === "save" && aiAnalysisText.trim(),
+  );
   const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
   const hasFilter = selectedFilterTags.length > 0;
@@ -518,7 +550,7 @@ function App() {
   }, [editingLogId]);
 
   useEffect(() => {
-    if (!hasUnsavedEdit) {
+    if (!hasUnsavedEdit && !hasUnsavedAiAnalysisDraft) {
       return;
     }
 
@@ -529,7 +561,7 @@ function App() {
 
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [hasUnsavedEdit]);
+  }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit]);
 
   function focusCurrentEditor() {
     window.requestAnimationFrame(() => {
@@ -576,6 +608,14 @@ function App() {
     return true;
   }
 
+  function prepareToLeaveAiAnalysisDraft(): boolean {
+    if (!hasUnsavedAiAnalysisDraft) {
+      return true;
+    }
+
+    return window.confirm("入力中のAI分析が保存されていません。移動しますか？");
+  }
+
   function closeMenu() {
     setIsMenuOpen(false);
   }
@@ -586,7 +626,7 @@ function App() {
   }
 
   function showSearchView() {
-    if (!prepareToLeaveEditing()) {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
       closeMenu();
       return;
     }
@@ -601,12 +641,52 @@ function App() {
     closeMenu();
   }
 
+  function showAiAnalysisView() {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
+      closeMenu();
+      return;
+    }
+
+    setViewMode("ai-analysis");
+    setAiAnalysisScreen("list");
+    setSelectedAiAnalysis(null);
+    setAiAnalysisNotice("");
+    closeMenu();
+  }
+
+  function openAiAnalysisSaveScreen() {
+    setAiAnalysisStartDate(reviewRange?.start ?? todayKey);
+    setAiAnalysisEndDate(reviewRange?.end ?? todayKey);
+    setAiAnalysisTag(reviewTagFilter);
+    setAiAnalysisText("");
+    setAiAnalysisFormMessage("");
+    setAiAnalysisNotice("");
+    setSelectedAiAnalysis(null);
+    setAiAnalysisScreen("save");
+  }
+
+  function openAiAnalysisDetail(analysis: AiAnalysis) {
+    setSelectedAiAnalysis(analysis);
+    setAiAnalysisNotice("");
+    setAiAnalysisScreen("detail");
+  }
+
+  function showAiAnalysisList() {
+    if (!prepareToLeaveAiAnalysisDraft()) {
+      return;
+    }
+
+    setAiAnalysisFormMessage("");
+    setSelectedAiAnalysis(null);
+    setAiAnalysisScreen("list");
+  }
+
   function openRangePicker() {
     setIsRangePickerOpen(true);
   }
 
   function applyReviewRange(range: DateRange) {
-    if (!prepareToLeaveEditing()) {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
       setIsRangePickerOpen(false);
       return;
     }
@@ -753,6 +833,43 @@ function App() {
       isActive = false;
     };
   }, [isReviewView, reviewRange]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadAiAnalyses() {
+      if (!isAiAnalysisView) {
+        return;
+      }
+
+      setIsAiAnalysisLoading(true);
+      setAiAnalysisLoadError("");
+
+      try {
+        const entries = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
+
+        if (isActive) {
+          setAiAnalyses(entries);
+        }
+      } catch {
+        if (isActive) {
+          setAiAnalysisLoadError(
+            "AI分析を読み込めませんでした。画面を開き直すか、再読み込みしてください。",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsAiAnalysisLoading(false);
+        }
+      }
+    }
+
+    loadAiAnalyses();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isAiAnalysisView]);
 
   useEffect(() => {
     if (!highlightedLogId || isLoading || !isLogView) {
@@ -902,6 +1019,58 @@ function App() {
     }
   }
 
+  async function handleSaveAiAnalysis(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const savedText = aiAnalysisText;
+
+    if (
+      !isValidDateKey(aiAnalysisStartDate) ||
+      !isValidDateKey(aiAnalysisEndDate) ||
+      aiAnalysisStartDate > aiAnalysisEndDate ||
+      aiAnalysisEndDate > todayKey
+    ) {
+      setAiAnalysisFormMessage("期間を正しく入力してください。");
+      return;
+    }
+
+    if (!savedText.trim()) {
+      setAiAnalysisFormMessage("AI分析結果を入力してください。");
+      return;
+    }
+
+    const analysis: AiAnalysis = {
+      id: crypto.randomUUID(),
+      startDate: aiAnalysisStartDate,
+      endDate: aiAnalysisEndDate,
+      tag: aiAnalysisTag,
+      text: savedText,
+      createdAt: new Date().toISOString(),
+    };
+
+    setIsSavingAiAnalysis(true);
+    setAiAnalysisFormMessage("");
+
+    try {
+      await db.aiAnalyses.add(analysis);
+      setAiAnalyses((currentAnalyses) =>
+        sortAiAnalysesNewest([...currentAnalyses, analysis]),
+      );
+      setAiAnalysisText("");
+      setAiAnalysisNotice("AI分析を保存しました。");
+      setAiAnalysisScreen("list");
+    } catch (error) {
+      setAiAnalysisFormMessage(
+        `${getDataWriteErrorMessage(
+          error,
+          "AI分析を保存できませんでした。もう一度試してください。",
+        )} 入力内容は残っています。`,
+      );
+    } finally {
+      setIsSavingAiAnalysis(false);
+    }
+  }
+
   function startEditingLog(log: LogEntry): boolean {
     dismissInlineEditHint();
 
@@ -1042,6 +1211,7 @@ function App() {
 
     try {
       const allLogs = await db.logs.orderBy("createdAt").toArray();
+      const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").toArray();
       const backupLogs: BackupLogEntry[] = await Promise.all(
         allLogs.map(async (log) => {
           const normalizedLog = normalizeLog(log);
@@ -1061,15 +1231,24 @@ function App() {
         }),
       );
 
-      const blob = new Blob([JSON.stringify({ version: 1, logs: backupLogs }, null, 2)], {
-        type: "application/json",
-      });
+      const blob = new Blob(
+        [
+          JSON.stringify(
+            buildBackupFile(backupLogs, allAiAnalyses),
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json" },
+      );
       url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = `baseball-note-backup-${todayKey}.json`;
       link.click();
-      setBackupMessage(`${allLogs.length}件を書き出しました。`);
+      setBackupMessage(
+        `メモ${allLogs.length}件、AI分析${allAiAnalyses.length}件を書き出しました。`,
+      );
     } catch {
       const message =
         "バックアップを書き出せませんでした。画面を再読み込みして、もう一度試してください。";
@@ -1094,19 +1273,30 @@ function App() {
       setOperationError("");
       setBackupMessage("バックアップを確認しています。");
       const parsed: unknown = JSON.parse(await file.text());
-      const { logs: backupLogs } = validateBackup(parsed);
+      const { logs: backupLogs, aiAnalyses: backupAiAnalyses } = validateBackup(parsed);
       const existingLogs = await db.logs.bulkGet(backupLogs.map((log) => log.id));
-      const overwriteCount = existingLogs.filter((log) => log !== undefined).length;
-      const newCount = backupLogs.length - overwriteCount;
+      const existingAiAnalyses = await db.aiAnalyses.bulkGet(
+        backupAiAnalyses.map((analysis) => analysis.id),
+      );
+      const logOverwriteCount = existingLogs.filter((log) => log !== undefined).length;
+      const logNewCount = backupLogs.length - logOverwriteCount;
+      const aiAnalysisOverwriteCount = existingAiAnalyses.filter(
+        (analysis) => analysis !== undefined,
+      ).length;
+      const aiAnalysisNewCount = backupAiAnalyses.length - aiAnalysisOverwriteCount;
 
-      if (backupLogs.length === 0) {
-        setBackupMessage("このバックアップに読み込めるメモはありません。既存データは変更していません。");
+      if (backupLogs.length === 0 && backupAiAnalyses.length === 0) {
+        setBackupMessage(
+          "このバックアップに読み込めるメモやAI分析はありません。既存データは変更していません。",
+        );
         return;
       }
 
       const shouldImport = window.confirm(
-        `${backupLogs.length}件を読み込みます。\n新規: ${newCount}件\n上書き: ${overwriteCount}件\n\n` +
-          "同じIDのメモは上書きされます。読み込みを続けますか？",
+        `メモ${backupLogs.length}件とAI分析${backupAiAnalyses.length}件を読み込みます。\n` +
+          `メモ（新規${logNewCount}件、上書き${logOverwriteCount}件）\n` +
+          `AI分析（新規${aiAnalysisNewCount}件、上書き${aiAnalysisOverwriteCount}件）\n\n` +
+          "同じIDのデータは上書きされます。読み込みを続けますか？",
       );
 
       if (!shouldImport) {
@@ -1133,8 +1323,13 @@ function App() {
         })),
       );
 
-      await db.transaction("rw", db.logs, async () => {
-        await db.logs.bulkPut(restoredLogs);
+      await db.transaction("rw", db.logs, db.aiAnalyses, async () => {
+        if (restoredLogs.length > 0) {
+          await db.logs.bulkPut(restoredLogs);
+        }
+        if (backupAiAnalyses.length > 0) {
+          await db.aiAnalyses.bulkPut(backupAiAnalyses);
+        }
       });
       importWasApplied = true;
       const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
@@ -1150,13 +1345,22 @@ function App() {
           .toArray();
         setReviewLogs(sortLogsByDate(reviewEntries));
       }
+      if (isAiAnalysisView) {
+        const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
+        setAiAnalyses(allAiAnalyses);
+        if (selectedAiAnalysis) {
+          setSelectedAiAnalysis(
+            allAiAnalyses.find((analysis) => analysis.id === selectedAiAnalysis.id) ?? null,
+          );
+        }
+      }
       setBackupMessage(
-        `${restoredLogs.length}件を読み込みました（新規${newCount}件、上書き${overwriteCount}件）。`,
+        `メモ${restoredLogs.length}件、AI分析${backupAiAnalyses.length}件を読み込みました。`,
       );
     } catch (error) {
       if (importWasApplied) {
         const message =
-          "メモは読み込めましたが、画面を更新できませんでした。アプリを開き直してください。";
+          "データは読み込めましたが、画面を更新できませんでした。アプリを開き直してください。";
         setBackupMessage(message);
         setOperationError(message);
       } else {
@@ -1250,6 +1454,19 @@ function App() {
               aria-hidden="true"
             />
             <span>振り返り</span>
+          </button>
+          <button
+            className={isAiAnalysisView ? "nav-item active" : "nav-item"}
+            type="button"
+            onClick={showAiAnalysisView}
+          >
+            <FileText
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>AI分析</span>
           </button>
           <button
             className={isSearchView ? "nav-item active" : "nav-item"}
@@ -1516,6 +1733,217 @@ function App() {
                 ))
               )}
             </div>
+          </section>
+        ) : isAiAnalysisView ? (
+          <section className="ai-analysis-screen" aria-label="AI分析">
+            {aiAnalysisScreen === "list" ? (
+              <>
+                <header className="ai-analysis-list-header">
+                  <div className="ai-analysis-heading-row">
+                    <h1>AI分析</h1>
+                    <button
+                      className="ai-analysis-primary-button"
+                      type="button"
+                      onClick={openAiAnalysisSaveScreen}
+                      autoFocus
+                    >
+                      ＋ AI分析を保存
+                    </button>
+                  </div>
+                  {aiAnalysisNotice ? (
+                    <p className="ai-analysis-notice" role="status">
+                      {aiAnalysisNotice}
+                    </p>
+                  ) : null}
+                </header>
+
+                <div className="ai-analysis-list" aria-live="polite">
+                  {isAiAnalysisLoading ? (
+                    <div className="empty-state">読み込み中...</div>
+                  ) : aiAnalysisLoadError ? (
+                    <div className="empty-state data-error-state" role="alert">
+                      {aiAnalysisLoadError}
+                    </div>
+                  ) : aiAnalyses.length === 0 ? (
+                    <div className="empty-state">保存したAI分析はまだありません。</div>
+                  ) : (
+                    aiAnalyses.map((analysis) => (
+                      <button
+                        className="ai-analysis-list-item"
+                        type="button"
+                        key={analysis.id}
+                        onClick={() => openAiAnalysisDetail(analysis)}
+                      >
+                        <span className="ai-analysis-list-meta">
+                          <span className="ai-analysis-period">
+                            <time dateTime={analysis.startDate}>
+                              {formatJapaneseDate(analysis.startDate)}
+                            </time>
+                            <span aria-hidden="true">〜</span>
+                            <time dateTime={analysis.endDate}>
+                              {formatJapaneseDate(analysis.endDate)}
+                            </time>
+                          </span>
+                          <span className="ai-analysis-tag">{analysis.tag}</span>
+                          <time className="ai-analysis-saved-date" dateTime={analysis.createdAt}>
+                            保存 {formatSavedDate(analysis.createdAt)}
+                          </time>
+                        </span>
+                        <span className="ai-analysis-excerpt">{analysis.text}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </>
+            ) : aiAnalysisScreen === "save" ? (
+              <div className="ai-analysis-scroll-area">
+                <div className="ai-analysis-content">
+                  <button
+                    className="ai-analysis-back-button"
+                    type="button"
+                    onClick={showAiAnalysisList}
+                    autoFocus
+                  >
+                    ← 一覧へ戻る
+                  </button>
+                  <h1>AI分析を保存</h1>
+
+                  <form className="ai-analysis-form" onSubmit={handleSaveAiAnalysis}>
+                    <fieldset className="ai-analysis-fieldset">
+                      <legend>期間</legend>
+                      <div className="ai-analysis-date-fields">
+                        <label className="ai-analysis-field">
+                          <span>開始日</span>
+                          <input
+                            type="date"
+                            value={aiAnalysisStartDate}
+                            max={todayKey}
+                            onChange={(event) => {
+                              setAiAnalysisStartDate(event.target.value);
+                              setAiAnalysisFormMessage("");
+                            }}
+                            required
+                          />
+                        </label>
+                        <label className="ai-analysis-field">
+                          <span>終了日</span>
+                          <input
+                            type="date"
+                            value={aiAnalysisEndDate}
+                            min={aiAnalysisStartDate}
+                            max={todayKey}
+                            onChange={(event) => {
+                              setAiAnalysisEndDate(event.target.value);
+                              setAiAnalysisFormMessage("");
+                            }}
+                            required
+                          />
+                        </label>
+                      </div>
+                    </fieldset>
+
+                    <fieldset className="ai-analysis-fieldset">
+                      <legend>タグ</legend>
+                      <div className="review-filter-options" aria-label="AI分析の対象タグ">
+                        {reviewTagFilters.map((tag) => {
+                          const isSelected = aiAnalysisTag === tag;
+
+                          return (
+                            <button
+                              className={isSelected ? "review-tag-button selected" : "review-tag-button"}
+                              type="button"
+                              key={tag}
+                              onClick={() => {
+                                setAiAnalysisTag(tag);
+                                setAiAnalysisFormMessage("");
+                              }}
+                              aria-pressed={isSelected}
+                            >
+                              {tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+
+                    <label className="ai-analysis-field">
+                      <span>AI分析結果</span>
+                      <textarea
+                        className="ai-analysis-result-input"
+                        value={aiAnalysisText}
+                        placeholder="ChatGPTなどの分析結果を貼り付けてください"
+                        onChange={(event) => {
+                          setAiAnalysisText(event.target.value);
+                          setAiAnalysisFormMessage("");
+                        }}
+                        required
+                      />
+                    </label>
+
+                    {aiAnalysisFormMessage ? (
+                      <p className="ai-analysis-form-message" role="alert">
+                        {aiAnalysisFormMessage}
+                      </p>
+                    ) : null}
+
+                    <button
+                      className="ai-analysis-primary-button ai-analysis-save-button"
+                      type="submit"
+                      disabled={isSavingAiAnalysis}
+                    >
+                      {isSavingAiAnalysis ? "保存中" : "保存"}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ) : (
+              <div className="ai-analysis-scroll-area">
+                <div className="ai-analysis-content">
+                  <button
+                    className="ai-analysis-back-button"
+                    type="button"
+                    onClick={showAiAnalysisList}
+                    autoFocus
+                  >
+                    ← 一覧へ戻る
+                  </button>
+                  {selectedAiAnalysis ? (
+                    <article className="ai-analysis-detail">
+                      <h1>AI分析</h1>
+                      <dl className="ai-analysis-detail-meta">
+                        <div>
+                          <dt>期間</dt>
+                          <dd>
+                            <time dateTime={selectedAiAnalysis.startDate}>
+                              {formatJapaneseDate(selectedAiAnalysis.startDate)}
+                            </time>
+                            <span aria-hidden="true">〜</span>
+                            <time dateTime={selectedAiAnalysis.endDate}>
+                              {formatJapaneseDate(selectedAiAnalysis.endDate)}
+                            </time>
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>タグ</dt>
+                          <dd>{selectedAiAnalysis.tag}</dd>
+                        </div>
+                        <div>
+                          <dt>保存日</dt>
+                          <dd>
+                            <time dateTime={selectedAiAnalysis.createdAt}>
+                              {formatSavedDate(selectedAiAnalysis.createdAt)}
+                            </time>
+                          </dd>
+                        </div>
+                      </dl>
+                      <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>
+                    </article>
+                  ) : (
+                    <div className="empty-state">AI分析を表示できませんでした。</div>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
         ) : (
           <>
