@@ -52,6 +52,8 @@ const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球�
 - 医学・科学的な正誤判定より、まず本人の記録内にある傾向を分析する
 
 分析結果は、1〜9の見出しに分けて整理してください。`;
+const aiAnalysisOutputInstruction = `分析結果は、1〜9をすべて1つのコードブロック内に出力してください。
+Baseball Noteの「AI分析結果」へそのまま貼り付けるため、コードブロック内には分析結果以外の説明を入れないでください。`;
 
 type ReviewTagFilter = (typeof reviewTagFilters)[number];
 type AiAnalysisScreen = "list" | "save" | "detail";
@@ -216,7 +218,7 @@ function buildAiAnalysisText(
     })
     .join("\n\n");
 
-  return `${aiAnalysisPrompt}\n\n【対象期間】\n${range.start}〜${range.end}\n\n【対象タグ】\n${selectedTag}\n\n【Baseball Note記録】\n${records}`;
+  return `${aiAnalysisPrompt}\n\n【対象期間】\n${range.start}〜${range.end}\n\n【対象タグ】\n${selectedTag}\n\n【Baseball Note記録】\n${records}\n\n${aiAnalysisOutputInstruction}`;
 }
 
 async function copyTextToClipboard(textToCopy: string): Promise<void> {
