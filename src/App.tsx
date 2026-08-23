@@ -14,6 +14,7 @@ import {
   FileText,
   PencilLine,
   Search,
+  ShieldCheck,
   Tag,
   Upload,
 } from "lucide-react";
@@ -35,6 +36,7 @@ import {
   offsetDateKey,
   toDateKey,
 } from "./date";
+import { InformationScreen, type InformationPage } from "./InformationScreen";
 import { RecordReviewCalendar, type DateRange } from "./RecordReviewCalendar";
 import type { AiAnalysis, AiAnalysisTag, LogEntry, LogImage, LogTag } from "./types";
 
@@ -45,6 +47,7 @@ const imageQuality = 0.82;
 const menuIconSize = 21;
 const menuIconStrokeWidth = 1.8;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
+const lastBackupAtStorageKey = "baseball-note-last-backup-at";
 const onboardingCompletedStorageKey = "baseball-note-onboarding-completed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
@@ -112,6 +115,12 @@ type ReviewTagFilter = (typeof reviewTagFilters)[number];
 type AiAnalysisScreen = "list" | "save" | "detail";
 type OnboardingMode = "first-run" | "help" | null;
 type ComposerGuideStep = "tags" | "text" | null;
+type BackupDialogMode = "export" | "import" | null;
+
+type BackupSummary = {
+  logCount: number;
+  aiAnalysisCount: number;
+};
 
 type ReviewCopyStatus = {
   kind: "success" | "error";
@@ -120,6 +129,38 @@ type ReviewCopyStatus = {
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
+
+function readInformationPageFromHash(): InformationPage | null {
+  const page = window.location.hash.replace(/^#/, "");
+
+  if (page === "safety" || page === "privacy" || page === "terms") {
+    return page;
+  }
+
+  return null;
+}
+
+function hasCompletedOnboarding(): boolean {
+  try {
+    return window.localStorage.getItem(onboardingCompletedStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function loadLastBackupAt(): string | null {
+  try {
+    const savedAt = window.localStorage.getItem(lastBackupAtStorageKey);
+
+    if (!savedAt || Number.isNaN(new Date(savedAt).getTime())) {
+      return null;
+    }
+
+    return savedAt;
+  } catch {
+    return null;
+  }
+}
 
 function readFileAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -223,6 +264,16 @@ function formatSavedDate(dateTime: string): string {
     year: "numeric",
     month: "numeric",
     day: "numeric",
+  }).format(new Date(dateTime));
+}
+
+function formatLastBackupAt(dateTime: string): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(dateTime));
 }
 
@@ -474,9 +525,16 @@ type OnboardingDialogProps = {
   onStart: () => void;
   onDismiss: () => void;
   onClose: () => void;
+  onOpenSafety: (mode: Exclude<OnboardingMode, null>) => void;
 };
 
-function OnboardingDialog({ mode, onStart, onDismiss, onClose }: OnboardingDialogProps) {
+function OnboardingDialog({
+  mode,
+  onStart,
+  onDismiss,
+  onClose,
+  onOpenSafety,
+}: OnboardingDialogProps) {
   const isFirstRun = mode === "first-run";
   const dialogRef = useRef<HTMLElement>(null);
 
@@ -564,6 +622,18 @@ function OnboardingDialog({ mode, onStart, onDismiss, onClose }: OnboardingDialo
           </li>
         </ol>
 
+        <aside className="onboarding-safety-note" aria-label="記録の保存について">
+          <div>
+            <h3>記録の保存について</h3>
+            <p>
+              アカウント登録は不要です。記録や写真はこの端末の中に保存され、アプリの運営者には送られません。広告や、このアプリ独自のアクセス解析もありません。
+            </p>
+          </div>
+          <button type="button" onClick={() => onOpenSafety(mode)}>
+            詳しく見る
+          </button>
+        </aside>
+
         {isFirstRun ? (
           <div className="onboarding-actions">
             <button className="onboarding-start-button" type="button" onClick={onStart} autoFocus>
@@ -578,6 +648,118 @@ function OnboardingDialog({ mode, onStart, onDismiss, onClose }: OnboardingDialo
             閉じる
           </button>
         )}
+      </section>
+    </div>
+  );
+}
+
+type BackupDialogProps = {
+  mode: Exclude<BackupDialogMode, null>;
+  summary: BackupSummary | null;
+  lastBackupAt: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+function BackupDialog({ mode, summary, lastBackupAt, onConfirm, onCancel }: BackupDialogProps) {
+  const isExport = mode === "export";
+  const dialogRef = useRef<HTMLElement>(null);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onCancel();
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusableElements = dialogRef.current?.querySelectorAll<HTMLElement>(
+      "button:not(:disabled)",
+    );
+
+    if (!focusableElements?.length) {
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    } else if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  }
+
+  return (
+    <div className="backup-dialog-backdrop">
+      <section
+        ref={dialogRef}
+        className="backup-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backup-dialog-title"
+        onKeyDown={handleKeyDown}
+      >
+        <header>
+          <span>Baseball Note</span>
+          <h2 id="backup-dialog-title">{isExport ? "データを保存する" : "データを戻す"}</h2>
+        </header>
+
+        {isExport ? (
+          <div className="backup-dialog-body">
+            <p>「保存する」を押すと、記録のバックアップファイルが端末に保存されます。</p>
+            <p>
+              バックアップファイルは、記録が消えたときや別の端末へ移すときに、記録を元に戻すためのファイルです。
+            </p>
+            <p>
+              このファイルには記録や写真が入っているため、必要がない限り他人へ渡さず、大切に保管してください。
+            </p>
+            <dl className="backup-summary">
+              <div>
+                <dt>保存される内容</dt>
+                <dd>
+                  {summary
+                    ? `記録${summary.logCount}件・AI分析${summary.aiAnalysisCount}件`
+                    : "確認しています..."}
+                </dd>
+              </div>
+              <div>
+                <dt>最後にデータを保存した日</dt>
+                <dd>{lastBackupAt ? formatLastBackupAt(lastBackupAt) : "まだ記録されていません"}</dd>
+              </div>
+            </dl>
+          </div>
+        ) : (
+          <div className="backup-dialog-body">
+            <p>
+              以前に「データを保存」で作ったバックアップファイルを選び、記録をこの端末へ戻します。
+            </p>
+            <p>
+              ファイル内に同じ記録がある場合は上書きされ、それ以外の記録は追加されます。現在の記録がすべて消えることはありません。
+            </p>
+            <p>心配な場合は、先に現在のデータを保存してください。</p>
+          </div>
+        )}
+
+        <div className="backup-dialog-actions">
+          <button className="backup-dialog-cancel" type="button" onClick={onCancel} autoFocus>
+            キャンセル
+          </button>
+          <button
+            className="backup-dialog-confirm"
+            type="button"
+            onClick={onConfirm}
+            disabled={isExport && !summary}
+          >
+            {isExport ? "保存する" : "ファイルを選ぶ"}
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -620,6 +802,9 @@ function App() {
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
   const [operationError, setOperationError] = useState("");
+  const [backupDialogMode, setBackupDialogMode] = useState<BackupDialogMode>(null);
+  const [backupSummary, setBackupSummary] = useState<BackupSummary | null>(null);
+  const [lastBackupAt, setLastBackupAt] = useState<string | null>(loadLastBackupAt);
   const [viewMode, setViewMode] = useState<"logs" | "search" | "review" | "ai-analysis">(
     "logs",
   );
@@ -630,14 +815,19 @@ function App() {
   const [editingMessage, setEditingMessage] = useState("");
   const [savingEditLogId, setSavingEditLogId] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [informationPage, setInformationPage] = useState<InformationPage | null>(
+    readInformationPageFromHash,
+  );
+  const [informationReturnOnboardingMode, setInformationReturnOnboardingMode] =
+    useState<OnboardingMode>(() =>
+      readInformationPageFromHash() && !hasCompletedOnboarding() ? "first-run" : null,
+    );
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode>(() => {
-    try {
-      return window.localStorage.getItem(onboardingCompletedStorageKey) === "1"
-        ? null
-        : "first-run";
-    } catch {
-      return "first-run";
+    if (readInformationPageFromHash()) {
+      return null;
     }
+
+    return hasCompletedOnboarding() ? null : "first-run";
   });
   const [composerGuideStep, setComposerGuideStep] = useState<ComposerGuideStep>(null);
   const [showInlineEditHint, setShowInlineEditHint] = useState(() => {
@@ -657,12 +847,13 @@ function App() {
   const trimmedText = text.trim();
   const trimmedSearchQuery = searchQuery.trim();
   const normalizedSearchQuery = trimmedSearchQuery.toLowerCase();
-  const isLogView = viewMode === "logs";
-  const isSearchView = viewMode === "search";
-  const isReviewView = viewMode === "review";
-  const isAiAnalysisView = viewMode === "ai-analysis";
+  const isInformationView = informationPage !== null;
+  const isLogView = viewMode === "logs" && !isInformationView;
+  const isSearchView = viewMode === "search" && !isInformationView;
+  const isReviewView = viewMode === "review" && !isInformationView;
+  const isAiAnalysisView = viewMode === "ai-analysis" && !isInformationView;
   const hasUnsavedAiAnalysisDraft = Boolean(
-    isAiAnalysisView && aiAnalysisScreen === "save" && aiAnalysisText.trim(),
+    viewMode === "ai-analysis" && aiAnalysisScreen === "save" && aiAnalysisText.trim(),
   );
   const hasSearchQuery = trimmedSearchQuery.length > 0;
   const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
@@ -739,6 +930,29 @@ function App() {
   useEffect(() => {
     setReviewCopyStatus(null);
   }, [reviewLogs, reviewRange, reviewTagFilter]);
+
+  useEffect(() => {
+    function syncInformationPageWithHash() {
+      const nextPage = readInformationPageFromHash();
+      setInformationPage(nextPage);
+
+      if (nextPage) {
+        setOnboardingMode(null);
+      }
+    }
+
+    window.addEventListener("hashchange", syncInformationPageWithHash);
+    return () => window.removeEventListener("hashchange", syncInformationPageWithHash);
+  }, []);
+
+  useEffect(() => {
+    if (informationPage || !informationReturnOnboardingMode) {
+      return;
+    }
+
+    setOnboardingMode(informationReturnOnboardingMode);
+    setInformationReturnOnboardingMode(null);
+  }, [informationPage, informationReturnOnboardingMode]);
 
   useEffect(() => {
     if (!editingLogId) {
@@ -859,6 +1073,21 @@ function App() {
     closeMenu();
   }
 
+  function updateInformationPage(page: InformationPage | null) {
+    const nextUrl = page
+      ? `${window.location.pathname}${window.location.search}#${page}`
+      : `${window.location.pathname}${window.location.search}`;
+
+    window.history.replaceState(null, "", nextUrl);
+    setInformationPage(page);
+  }
+
+  function openSafetyFromOnboarding(mode: Exclude<OnboardingMode, null>) {
+    setInformationReturnOnboardingMode(mode);
+    setOnboardingMode(null);
+    updateInformationPage("safety");
+  }
+
   function prepareToLeaveEditing(): boolean {
     if (!editingLogId) {
       return true;
@@ -882,6 +1111,36 @@ function App() {
     }
 
     return window.confirm("入力中のAI分析が保存されていません。移動しますか？");
+  }
+
+  function openSafetyPage() {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
+      closeMenu();
+      return;
+    }
+
+    setInformationReturnOnboardingMode(null);
+    updateInformationPage("safety");
+    closeMenu();
+  }
+
+  function navigateInformationPage(page: InformationPage) {
+    updateInformationPage(page);
+    window.scrollTo({ top: 0 });
+  }
+
+  function closeInformationPage() {
+    updateInformationPage(null);
+    window.scrollTo({ top: 0 });
+  }
+
+  function goBackFromInformationPage() {
+    if (informationPage === "privacy" || informationPage === "terms") {
+      navigateInformationPage("safety");
+      return;
+    }
+
+    closeInformationPage();
   }
 
   function closeMenu() {
@@ -1479,7 +1738,43 @@ function App() {
     }
   }
 
+  async function openExportBackupDialog() {
+    setOperationError("");
+    setBackupSummary(null);
+    setBackupDialogMode("export");
+    closeMenu();
+
+    try {
+      const [logCount, aiAnalysisCount] = await Promise.all([
+        db.logs.count(),
+        db.aiAnalyses.count(),
+      ]);
+      setBackupSummary({ logCount, aiAnalysisCount });
+    } catch {
+      const message =
+        "保存するデータの件数を確認できませんでした。画面を再読み込みして、もう一度試してください。";
+      setBackupDialogMode(null);
+      setOperationError(message);
+    }
+  }
+
+  function openImportBackupDialog() {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
+      closeMenu();
+      return;
+    }
+
+    setBackupDialogMode("import");
+    closeMenu();
+  }
+
+  function selectBackupFile() {
+    setBackupDialogMode(null);
+    window.requestAnimationFrame(() => importInputRef.current?.click());
+  }
+
   async function handleExportBackup() {
+    setBackupDialogMode(null);
     setOperationError("");
     let url = "";
 
@@ -1520,6 +1815,14 @@ function App() {
       link.href = url;
       link.download = `baseball-note-backup-${todayKey}.json`;
       link.click();
+      const savedAt = new Date().toISOString();
+      setLastBackupAt(savedAt);
+
+      try {
+        window.localStorage.setItem(lastBackupAtStorageKey, savedAt);
+      } catch {
+        // 保存日は補助表示のため、記録できない環境でもバックアップ書き出しは完了させる。
+      }
       setBackupMessage(
         `メモ${allLogs.length}件、AI分析${allAiAnalyses.length}件を書き出しました。`,
       );
@@ -1758,10 +2061,7 @@ function App() {
           <button
             className="nav-item"
             type="button"
-            onClick={() => {
-              handleExportBackup();
-              closeMenu();
-            }}
+            onClick={openExportBackupDialog}
           >
             <Download
               className="nav-item-icon"
@@ -1774,15 +2074,7 @@ function App() {
           <button
             className="nav-item"
             type="button"
-            onClick={() => {
-              if (!prepareToLeaveEditing()) {
-                closeMenu();
-                return;
-              }
-
-              importInputRef.current?.click();
-              closeMenu();
-            }}
+            onClick={openImportBackupDialog}
           >
             <Upload
               className="nav-item-icon"
@@ -1808,6 +2100,19 @@ function App() {
             />
             <span>使い方</span>
           </button>
+          <button
+            className={isInformationView ? "nav-item active" : "nav-item"}
+            type="button"
+            onClick={openSafetyPage}
+          >
+            <ShieldCheck
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>安全とデータについて</span>
+          </button>
         </nav>
         {backupMessage ? <p className="sidebar-note">{backupMessage}</p> : null}
       </aside>
@@ -1830,7 +2135,13 @@ function App() {
               : "main-pane"
         }
       >
-        {isSearchView ? (
+        {isInformationView && informationPage ? (
+          <InformationScreen
+            page={informationPage}
+            onBack={goBackFromInformationPage}
+            onNavigate={navigateInformationPage}
+          />
+        ) : isSearchView ? (
           <section className="search-screen" aria-label="メモを検索">
             <div className="search-header">
               <label className="search-field">
@@ -2552,12 +2863,24 @@ function App() {
           onCancel={() => setIsRangePickerOpen(false)}
         />
       ) : null}
+      {backupDialogMode ? (
+        <BackupDialog
+          mode={backupDialogMode}
+          summary={backupSummary}
+          lastBackupAt={lastBackupAt}
+          onConfirm={
+            backupDialogMode === "export" ? handleExportBackup : selectBackupFile
+          }
+          onCancel={() => setBackupDialogMode(null)}
+        />
+      ) : null}
       {onboardingMode ? (
         <OnboardingDialog
           mode={onboardingMode}
           onStart={startOnboardingGuide}
           onDismiss={dismissOnboarding}
           onClose={() => setOnboardingMode(null)}
+          onOpenSafety={openSafetyFromOnboarding}
         />
       ) : null}
     </div>

@@ -49,6 +49,7 @@
 - 振り返り期間のlocalStorageキー: `baseball-note-record-review-range`
 - 本文の直接編集案内のlocalStorageキー: `baseball-note-inline-edit-hint-dismissed`
 - 初回の使い方案内のlocalStorageキー: `baseball-note-onboarding-completed`
+- 最後にデータを保存した日時のlocalStorageキー: `baseball-note-last-backup-at`
 
 明確な許可と移行方針なしに、次の操作を行いません。
 
