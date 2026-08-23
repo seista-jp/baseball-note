@@ -30,6 +30,7 @@ const menuIconStrokeWidth = 1.8;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
+const primaryFocusMarker = "【今、一番意識していること】";
 const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球の記録です。
 記録だけを根拠に、分析結果を「まず見る要点」と「詳しく読む振り返り」の2段構成で整理してください。
 
@@ -72,8 +73,22 @@ const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球�
 - 医学・科学的な正誤判定より、まず本人の記録内にある傾向を分析する
 
 短い要点と詳しい振り返りで、事実の扱いや結論を変えないでください。`;
-const aiAnalysisOutputInstruction = `「まず見る要点」と「詳しく読む振り返り」の両方を、1つのコードブロック内に出力してください。
-Baseball Noteの「AI分析結果」へそのまま貼り付けるため、コードブロック内には分析結果以外の説明を入れないでください。`;
+const primaryFocusAnalysisInstruction = `【長期判定について】
+
+「長期判定用記録」は、選択期間や選択タグに関係なく、保存されている全期間・全カテゴリーの記録です。
+この記録全体を意味の近い内容ごとにまとめ、本人が最も多く、長く意識していることを1つ判断してください。
+
+- 選択期間だけで判断せず、長期判定用記録の全体を使う
+- 同じ意味を別の言葉で書いた記録も、根拠がある場合は同じ意識としてまとめる
+- 最近の記録だけで、それ以前から続く大事な意識を外さない
+- 判断の根拠となる日付や記録を「詳しく読む振り返り」で示す
+- 記録だけでは1つに決められない場合は、「まだ判断できない」とする
+
+回答全体を1つのコードブロックに入れ、そのコードブロックの1行目を必ず次の形式にしてください。
+${primaryFocusMarker}ここに一番意識していることを短く書く
+
+その後に「まず見る要点」と「詳しく読む振り返り」を続けてください。`;
+const aiAnalysisOutputInstruction = `Baseball Noteの「AI分析結果」へそのまま貼り付けるため、コードブロック内には分析結果以外の説明を入れないでください。`;
 
 type ReviewTagFilter = (typeof reviewTagFilters)[number];
 type AiAnalysisScreen = "list" | "save" | "detail";
@@ -229,16 +244,44 @@ function saveReviewRange(range: DateRange): void {
 function buildAiAnalysisText(
   range: DateRange,
   selectedTag: ReviewTagFilter,
-  entries: LogEntry[],
+  selectedEntries: LogEntry[],
+  longTermEntries: LogEntry[],
 ): string {
-  const records = entries
+  const formatRecords = (entries: LogEntry[]) => entries
     .map((log) => {
       const tagLabel = log.tags.length > 0 ? log.tags.join("・") : "その他";
       return `【${log.date}｜${tagLabel}】\n${log.text}`;
     })
     .join("\n\n");
+  const selectedRecords = formatRecords(selectedEntries);
+  const longTermRecords = formatRecords(longTermEntries);
 
-  return `${aiAnalysisPrompt}\n\n【対象期間】\n${range.start}〜${range.end}\n\n【対象タグ】\n${selectedTag}\n\n【Baseball Note記録】\n${records}\n\n${aiAnalysisOutputInstruction}`;
+  return `${aiAnalysisPrompt}\n\n【対象期間】\n${range.start}〜${range.end}\n\n【対象タグ】\n${selectedTag}\n\n【選択期間のBaseball Note記録】\n${selectedRecords}\n\n${primaryFocusAnalysisInstruction}\n\n【長期判定用記録（全期間・全カテゴリー）】\n${longTermRecords}\n\n${aiAnalysisOutputInstruction}`;
+}
+
+function extractPrimaryFocus(text: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    const normalizedLine = line
+      .trim()
+      .replace(/^[-*]\s*/, "")
+      .replace(/^\*\*/, "")
+      .replace(/\*\*$/, "");
+
+    if (!normalizedLine.startsWith(primaryFocusMarker)) {
+      continue;
+    }
+
+    const focus = normalizedLine
+      .slice(primaryFocusMarker.length)
+      .replace(/^[:：]\s*/, "")
+      .trim();
+
+    if (focus) {
+      return focus;
+    }
+  }
+
+  return null;
 }
 
 async function copyTextToClipboard(textToCopy: string): Promise<void> {
@@ -536,6 +579,17 @@ function App() {
 
     return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
   }, [filteredReviewLogs]);
+  const primaryFocus = useMemo(() => {
+    for (const analysis of aiAnalyses) {
+      const focus = extractPrimaryFocus(analysis.text);
+
+      if (focus) {
+        return focus;
+      }
+    }
+
+    return null;
+  }, [aiAnalyses]);
 
   useEffect(() => {
     setReviewCopyStatus(null);
@@ -860,12 +914,10 @@ function App() {
     let isActive = true;
 
     async function loadAiAnalyses() {
-      if (!isAiAnalysisView) {
-        return;
+      if (isAiAnalysisView) {
+        setIsAiAnalysisLoading(true);
+        setAiAnalysisLoadError("");
       }
-
-      setIsAiAnalysisLoading(true);
-      setAiAnalysisLoadError("");
 
       try {
         const entries = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
@@ -874,13 +926,13 @@ function App() {
           setAiAnalyses(entries);
         }
       } catch {
-        if (isActive) {
+        if (isActive && isAiAnalysisView) {
           setAiAnalysisLoadError(
             "AI分析を読み込めませんでした。画面を開き直すか、再読み込みしてください。",
           );
         }
       } finally {
-        if (isActive) {
+        if (isActive && isAiAnalysisView) {
           setIsAiAnalysisLoading(false);
         }
       }
@@ -1026,8 +1078,16 @@ function App() {
     setReviewCopyStatus(null);
 
     try {
+      const allEntries = await db.logs.orderBy("createdAt").toArray();
+      const longTermEntries = sortLogsByDate(allEntries);
+
       await copyTextToClipboard(
-        buildAiAnalysisText(reviewRange, reviewTagFilter, filteredReviewLogs),
+        buildAiAnalysisText(
+          reviewRange,
+          reviewTagFilter,
+          filteredReviewLogs,
+          longTermEntries,
+        ),
       );
       setReviewCopyStatus({
         kind: "success",
@@ -1367,9 +1427,9 @@ function App() {
           .toArray();
         setReviewLogs(sortLogsByDate(reviewEntries));
       }
+      const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
+      setAiAnalyses(allAiAnalyses);
       if (isAiAnalysisView) {
-        const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
-        setAiAnalyses(allAiAnalyses);
         if (selectedAiAnalysis) {
           setSelectedAiAnalysis(
             allAiAnalyses.find((analysis) => analysis.id === selectedAiAnalysis.id) ?? null,
@@ -1999,6 +2059,12 @@ function App() {
         </header>
 
         <section className="log-list" aria-live="polite" tabIndex={-1}>
+          {isToday && primaryFocus ? (
+            <section className="primary-focus" aria-label="今、一番意識していること">
+              <span>今、一番意識していること</span>
+              <p>{primaryFocus}</p>
+            </section>
+          ) : null}
           {showInlineEditHint && logs.length > 0 && !isLoading && !logLoadError ? (
             <div className="inline-edit-hint" role="status">
               <span>メモをタップすると編集できます</span>

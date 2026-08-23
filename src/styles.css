@@ -1323,6 +1323,33 @@ h1 {
   outline: none;
 }
 
+.primary-focus {
+  display: grid;
+  gap: 5px;
+  width: min(100%, 766px);
+  margin-bottom: 18px;
+  border: 1px solid #d9decf;
+  border-radius: 10px;
+  background: #f2f6eb;
+  padding: 12px 14px;
+}
+
+.primary-focus span {
+  color: #677052;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.primary-focus p {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #29311e;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
 .inline-edit-hint {
   display: flex;
   align-items: center;
@@ -2142,6 +2169,16 @@ h1 {
   .log-list {
     gap: 0;
     padding: 16px 16px 20px;
+  }
+
+  .primary-focus {
+    width: 100%;
+    margin-bottom: 14px;
+    padding: 11px 12px;
+  }
+
+  .primary-focus p {
+    font-size: 16px;
   }
 
   .inline-edit-hint {
