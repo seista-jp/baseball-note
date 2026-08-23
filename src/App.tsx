@@ -1147,6 +1147,22 @@ function App() {
     setIsMenuOpen(false);
   }
 
+  function showTodayView() {
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) {
+      closeMenu();
+      return;
+    }
+
+    setInformationReturnOnboardingMode(null);
+    updateInformationPage(null);
+    setSelectedDate(todayKey);
+    setHighlightedLogId(null);
+    setViewMode("logs");
+    setSearchQuery("");
+    closeMenu();
+    window.scrollTo({ top: 0 });
+  }
+
   function showLogView() {
     setViewMode("logs");
     setSearchQuery("");
@@ -1974,7 +1990,14 @@ function App() {
           <span />
           <span />
         </button>
-        <span className="mobile-brand-title">Baseball Note</span>
+        <button
+          className="mobile-brand-title"
+          type="button"
+          onClick={showTodayView}
+          aria-label="今日の記録へ戻る"
+        >
+          Baseball Note
+        </button>
         {isLogView ? (
           <>
             <h1 className="mobile-context-heading">{isToday ? "今日の記録" : "過去の記録"}</h1>
@@ -2009,10 +2032,15 @@ function App() {
 
       <aside className={isMenuOpen ? "sidebar menu-open" : "sidebar"} id="app-menu" aria-label="メニュー">
         <div className="sidebar-top">
-          <div className="brand">
+          <button
+            className="brand"
+            type="button"
+            onClick={showTodayView}
+            aria-label="今日の記録へ戻る"
+          >
             <img src={`${import.meta.env.BASE_URL}baseball-note-logo.svg`} alt="" className="brand-mark" />
             <span className="brand-title">Baseball Note</span>
-          </div>
+          </button>
           <button className="menu-close-button" type="button" onClick={closeMenu} aria-label="メニューを閉じる">
             閉じる
           </button>

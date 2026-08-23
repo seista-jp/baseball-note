@@ -66,10 +66,27 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin: -4px;
+  padding: 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: #272722;
   font-size: 15px;
   font-weight: 650;
   line-height: 1.3;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.brand:hover {
+  background: #e7e5df;
+}
+
+.brand:focus-visible,
+.mobile-brand-title:focus-visible {
+  outline: 2px solid #68675e;
+  outline-offset: 2px;
 }
 
 .brand-mark {
@@ -2574,15 +2591,28 @@ h1 {
   }
 
   .mobile-brand-title {
-    display: block;
+    display: flex;
     min-width: 0;
+    min-height: 44px;
+    align-items: center;
     overflow: hidden;
+    padding: 0 2px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     color: #272722;
     font-size: 18px;
     font-weight: 650;
     letter-spacing: -0.3px;
+    line-height: 1.2;
+    text-align: left;
     text-overflow: ellipsis;
+    touch-action: manipulation;
     white-space: nowrap;
+  }
+
+  .mobile-brand-title:hover {
+    background: #e7e5df;
   }
 
   .mobile-context-heading {
