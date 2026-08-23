@@ -1,5 +1,22 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { CalendarDays, Download, FileText, Search, Upload } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import {
+  CalendarDays,
+  CircleQuestionMark,
+  Download,
+  FileText,
+  PencilLine,
+  Search,
+  Tag,
+  Upload,
+} from "lucide-react";
 import {
   BackupValidationError,
   buildBackupFile,
@@ -28,6 +45,7 @@ const imageQuality = 0.82;
 const menuIconSize = 21;
 const menuIconStrokeWidth = 1.8;
 const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
+const onboardingCompletedStorageKey = "baseball-note-onboarding-completed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
 const primaryFocusMarker = "【今、一番意識していること】";
@@ -92,6 +110,8 @@ const aiAnalysisOutputInstruction = `Baseball Noteの「AI分析結果」へそ�
 
 type ReviewTagFilter = (typeof reviewTagFilters)[number];
 type AiAnalysisScreen = "list" | "save" | "detail";
+type OnboardingMode = "first-run" | "help" | null;
+type ComposerGuideStep = "tags" | "text" | null;
 
 type ReviewCopyStatus = {
   kind: "success" | "error";
@@ -449,6 +469,120 @@ function TagFilter({ selectedTags, onToggle, onClear }: TagFilterProps) {
   );
 }
 
+type OnboardingDialogProps = {
+  mode: Exclude<OnboardingMode, null>;
+  onStart: () => void;
+  onDismiss: () => void;
+  onClose: () => void;
+};
+
+function OnboardingDialog({ mode, onStart, onDismiss, onClose }: OnboardingDialogProps) {
+  const isFirstRun = mode === "first-run";
+  const dialogRef = useRef<HTMLElement>(null);
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (isFirstRun) {
+        onDismiss();
+      } else {
+        onClose();
+      }
+      return;
+    }
+
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const focusableElements = dialogRef.current?.querySelectorAll<HTMLElement>("button");
+
+    if (!focusableElements?.length) {
+      return;
+    }
+
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    } else if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  }
+
+  return (
+    <div className="onboarding-backdrop">
+      <section
+        ref={dialogRef}
+        className="onboarding-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="onboarding-title"
+        aria-describedby="onboarding-description"
+        onKeyDown={handleKeyDown}
+      >
+        <header className="onboarding-header">
+          <span className="onboarding-eyebrow">Baseball Noteの使い方</span>
+          <h2 id="onboarding-title">今日の感覚や、意識したことを記録しよう</h2>
+          <p id="onboarding-description">
+            練習や試合で気づいたことを短く残して、あとから振り返れます。
+          </p>
+        </header>
+
+        <ol className="onboarding-steps">
+          <li>
+            <span className="onboarding-step-icon" aria-hidden="true">
+              <Tag size={25} strokeWidth={1.8} />
+            </span>
+            <div>
+              <h3>1. タグを選ぶ</h3>
+              <p>
+                打撃や守備など、記録に合うタグを選びます。選ばなくても保存できますが、選ぶとあとからタグごとに探しやすくなります。
+              </p>
+            </div>
+          </li>
+          <li>
+            <span className="onboarding-step-icon" aria-hidden="true">
+              <PencilLine size={25} strokeWidth={1.8} />
+            </span>
+            <div>
+              <h3>2. 感じたことを書く</h3>
+              <p>今日の感覚や気づいたことを書きます。短いひとことでも保存できます。</p>
+            </div>
+          </li>
+          <li>
+            <span className="onboarding-step-icon" aria-hidden="true">
+              <CalendarDays size={25} strokeWidth={1.8} />
+            </span>
+            <div>
+              <h3>3. あとから振り返る</h3>
+              <p>「振り返り」を開くと、選んだ期間の記録をまとめて見られます。</p>
+            </div>
+          </li>
+        </ol>
+
+        {isFirstRun ? (
+          <div className="onboarding-actions">
+            <button className="onboarding-start-button" type="button" onClick={onStart} autoFocus>
+              始める
+            </button>
+            <button className="onboarding-later-button" type="button" onClick={onDismiss}>
+              あとで見る
+            </button>
+          </div>
+        ) : (
+          <button className="onboarding-close-button" type="button" onClick={onClose} autoFocus>
+            閉じる
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -496,6 +630,16 @@ function App() {
   const [editingMessage, setEditingMessage] = useState("");
   const [savingEditLogId, setSavingEditLogId] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [onboardingMode, setOnboardingMode] = useState<OnboardingMode>(() => {
+    try {
+      return window.localStorage.getItem(onboardingCompletedStorageKey) === "1"
+        ? null
+        : "first-run";
+    } catch {
+      return "first-run";
+    }
+  });
+  const [composerGuideStep, setComposerGuideStep] = useState<ComposerGuideStep>(null);
   const [showInlineEditHint, setShowInlineEditHint] = useState(() => {
     try {
       return window.localStorage.getItem(inlineEditHintStorageKey) !== "1";
@@ -505,6 +649,7 @@ function App() {
   });
   const imageInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaretRef = useRef<{ logId: string; start: number; end: number } | null>(null);
 
@@ -639,6 +784,28 @@ function App() {
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit]);
 
+  useEffect(() => {
+    if (!composerGuideStep) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const target =
+        composerGuideStep === "text"
+          ? composerTextareaRef.current
+          : document.querySelector<HTMLElement>(".tag-picker");
+      target?.scrollIntoView({ block: "nearest" });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [composerGuideStep]);
+
+  useEffect(() => {
+    if (!isLogView) {
+      setComposerGuideStep(null);
+    }
+  }, [isLogView]);
+
   function focusCurrentEditor() {
     window.requestAnimationFrame(() => {
       editingTextareaRef.current?.focus({ preventScroll: true });
@@ -665,6 +832,31 @@ function App() {
     } catch {
       // localStorageを使用できない環境でも、現在の表示中は案内を閉じる。
     }
+  }
+
+  function rememberOnboardingCompletion() {
+    try {
+      window.localStorage.setItem(onboardingCompletedStorageKey, "1");
+    } catch {
+      // localStorageを使用できない環境でも、現在の表示中は案内を閉じる。
+    }
+  }
+
+  function startOnboardingGuide() {
+    rememberOnboardingCompletion();
+    setOnboardingMode(null);
+    setComposerGuideStep("tags");
+  }
+
+  function dismissOnboarding() {
+    rememberOnboardingCompletion();
+    setOnboardingMode(null);
+    setComposerGuideStep(null);
+  }
+
+  function openHelp() {
+    setOnboardingMode("help");
+    closeMenu();
   }
 
   function prepareToLeaveEditing(): boolean {
@@ -974,10 +1166,10 @@ function App() {
 
   const emptyMessage = useMemo(() => {
     if (isToday) {
-      return "今日の感覚を短く書いて送信します。";
+      return "今日の感覚を短く書いて保存します。";
     }
 
-    return "この日のログはまだありません。";
+    return "この日の記録はまだありません。";
   }, [isToday]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1482,7 +1674,7 @@ function App() {
         <span className="mobile-brand-title">Baseball Note</span>
         {isLogView ? (
           <>
-            <h1 className="mobile-context-heading">{isToday ? "今日のログ" : "過去のログ"}</h1>
+            <h1 className="mobile-context-heading">{isToday ? "今日の記録" : "過去の記録"}</h1>
             <div className="mobile-date-controls" aria-label="日付移動">
               <button
                 className="mobile-date-nav-button"
@@ -1577,7 +1769,7 @@ function App() {
               strokeWidth={menuIconStrokeWidth}
               aria-hidden="true"
             />
-            <span>バックアップ</span>
+            <span>データを保存</span>
           </button>
           <button
             className="nav-item"
@@ -1598,7 +1790,7 @@ function App() {
               strokeWidth={menuIconStrokeWidth}
               aria-hidden="true"
             />
-            <span>読み込み</span>
+            <span>データを戻す</span>
           </button>
           <input
             ref={importInputRef}
@@ -1607,6 +1799,15 @@ function App() {
             accept="application/json"
             onChange={handleImportBackup}
           />
+          <button className="nav-item nav-help-item" type="button" onClick={openHelp}>
+            <CircleQuestionMark
+              className="nav-item-icon"
+              size={menuIconSize}
+              strokeWidth={menuIconStrokeWidth}
+              aria-hidden="true"
+            />
+            <span>使い方</span>
+          </button>
         </nav>
         {backupMessage ? <p className="sidebar-note">{backupMessage}</p> : null}
       </aside>
@@ -2031,7 +2232,7 @@ function App() {
           <>
         <header className="topbar">
           <div className="topbar-main">
-            <p className="eyebrow">{isToday ? "今日のログ" : "過去のログ"}</p>
+            <p className="eyebrow">{isToday ? "今日の記録" : "過去の記録"}</p>
             <div className="date-navigator" aria-label="日付移動">
               <button
                 className="date-nav-button"
@@ -2273,6 +2474,14 @@ function App() {
 
         <form className="composer" onSubmit={handleSubmit}>
           {submitMessage ? <p className="composer-message">{submitMessage}</p> : null}
+          {composerGuideStep === "tags" ? (
+            <div className="composer-guide" role="region" aria-label="タグの入力案内">
+              <span aria-live="polite">まず、タグを選びます。選ばなくても大丈夫です。</span>
+              <button type="button" onClick={() => setComposerGuideStep("text")}>
+                次へ
+              </button>
+            </div>
+          ) : null}
           <div className="tag-picker" aria-label="タグを選択">
             {logTags.map((tag) => {
               const isSelected = selectedTags.includes(tag);
@@ -2306,6 +2515,11 @@ function App() {
             accept="image/*"
             onChange={handleImageChange}
           />
+          {composerGuideStep === "text" ? (
+            <div className="composer-guide composer-text-guide" role="status">
+              ここに今日の感覚や気づいたことを書きます。
+            </div>
+          ) : null}
           <button
             className="attach-button"
             type="button"
@@ -2315,14 +2529,16 @@ function App() {
             画像
           </button>
           <textarea
+            ref={composerTextareaRef}
             aria-label="メモ"
             placeholder="例: 外角を逆方向へ押せた"
             rows={1}
             value={text}
+            onFocus={() => setComposerGuideStep(null)}
             onChange={(event) => setText(event.target.value)}
           />
           <button className="send-button" type="submit" disabled={!canSubmit}>
-            {isSaving ? "保存中" : "送信"}
+            {isSaving ? "保存中" : "保存"}
           </button>
         </form>
           </>
@@ -2334,6 +2550,14 @@ function App() {
           maxDate={todayKey}
           onApply={applyReviewRange}
           onCancel={() => setIsRangePickerOpen(false)}
+        />
+      ) : null}
+      {onboardingMode ? (
+        <OnboardingDialog
+          mode={onboardingMode}
+          onStart={startOnboardingGuide}
+          onDismiss={dismissOnboarding}
+          onClose={() => setOnboardingMode(null)}
         />
       ) : null}
     </div>
