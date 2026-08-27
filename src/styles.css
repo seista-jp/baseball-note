@@ -3131,6 +3131,10 @@ h1 {
     grid-template-columns: 1fr;
   }
 
+  .tag-picker {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .attach-button,
   .send-button {
     min-width: 52px;
