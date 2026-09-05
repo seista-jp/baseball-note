@@ -23,6 +23,8 @@
 - 日付処理: `src/date.ts`
 - IndexedDB: `src/db.ts`、`src/types.ts`
 - バックアップ形式と検証: `src/backup.ts`
+- 新規メモの下書き・競合・保存の一括処理: `src/drafts.ts`
+- 下書きの隔離ブラウザテスト: `tests/drafts.html`、`tests/drafts.test.ts`
 - データ操作エラー: `src/dataError.ts`
 - 起動とService Worker登録: `src/main.tsx`
 - ビルドや依存関係: `package.json`、`vite.config.js`、`tsconfig.json`
@@ -41,10 +43,11 @@
 
 - Dexieのデータベース名: `baseballNote`
 - テーブル名: 通常メモの `logs`、AI分析の `aiAnalyses`
-- 現在のIndexedDBスキーマ: バージョン2。`logs` は既存の `id, date, createdAt`、`aiAnalyses` は `id, createdAt` のインデックス
+- 現在のIndexedDBスキーマ: バージョン3。`logs` は既存の `id, date, createdAt`、`aiAnalyses` は `id, createdAt` のインデックスを維持。新規メモの下書き専用 `composerDrafts` は `id, state, updatedAt`
 - メモの基本項目: `id`、`date`、`createdAt`、`text`、`images`、`tags`
 - AI分析の基本項目: `id`、`startDate`、`endDate`、`tag`、`text`、`createdAt`
-- バックアップ形式: 新規書き出しはバージョン2のJSON。バージョン1と2を読み込み可能
+- バックアップ形式: 新規書き出しはバージョン2のJSON。バージョン1と2を読み込み可能。下書きは含めない
+- 下書きの本文・日付・タグ・画像は正式記録と区別し、競合時に別タブの入力を上書きしない。正式保存と対応下書きの内容消去は同一トランザクションで行う。保存済み・破棄済み行には内容を残さず、IDと処理状態を保持して古いタブの再登録を防ぐ
 - 既存バックアップで省略された画像とタグを空配列として補完し、バージョン1で省略されたAI分析を空配列として扱う互換処理
 - 振り返り期間のlocalStorageキー: `baseball-note-record-review-range`
 - 本文の直接編集案内のlocalStorageキー: `baseball-note-inline-edit-hint-dismissed`

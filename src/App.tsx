@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type FormEvent,
   type KeyboardEvent,
@@ -26,6 +27,7 @@ import {
 } from "./backup";
 import { getDataWriteErrorMessage } from "./dataError";
 import { db } from "./db";
+import { ComposerDraft, hasDraftContent } from "./drafts";
 import {
   formatDateHeading,
   formatDisplayDate,
@@ -783,11 +785,23 @@ function App() {
   const [aiAnalysisFormMessage, setAiAnalysisFormMessage] = useState("");
   const [aiAnalysisNotice, setAiAnalysisNotice] = useState("");
   const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
-  const [text, setText] = useState("");
+  const [draft] = useState(() => new ComposerDraft(db, todayKey));
+  const draftState = useSyncExternalStore(draft.subscribe, draft.getSnapshot);
+  const text = draftState.content.text;
+  const selectedTags = draftState.content.tags;
+  const pendingImage = draftState.content.images[0] ?? null;
+  const isSaving = draftState.saving;
+  const [isPreparingImage, setIsPreparingImage] = useState(false);
+  const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false);
+  const imagePreparationId = useRef(0);
+  const draftStarted = useRef(false);
+  const selectedDateRef = useRef(selectedDate);
+  selectedDateRef.current = selectedDate;
+  const hasNewDraft = hasDraftContent(draftState.content);
+  const draftDate = hasNewDraft ? draftState.content.date : selectedDate;
+  const composerDisabled = !draftState.ready || draftState.busy || isDiscardConfirmOpen;
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedTags, setSelectedTags] = useState<LogTag[]>([]);
   const [selectedFilterTags, setSelectedFilterTags] = useState<LogTag[]>([]);
-  const [pendingImage, setPendingImage] = useState<LogImage | null>(null);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSearchLoading, setIsSearchLoading] = useState(false);
@@ -797,7 +811,6 @@ function App() {
   const [searchLoadError, setSearchLoadError] = useState("");
   const [reviewLoadError, setReviewLoadError] = useState("");
   const [aiAnalysisLoadError, setAiAnalysisLoadError] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
   const [isSavingAiAnalysis, setIsSavingAiAnalysis] = useState(false);
   const [submitMessage, setSubmitMessage] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -856,7 +869,7 @@ function App() {
     viewMode === "ai-analysis" && aiAnalysisScreen === "save" && aiAnalysisText.trim(),
   );
   const hasSearchQuery = trimmedSearchQuery.length > 0;
-  const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving;
+  const canSubmit = Boolean(trimmedText || pendingImage) && !isSaving && !composerDisabled && !isPreparingImage;
   const hasFilter = selectedFilterTags.length > 0;
   const editingLog = useMemo(
     () => logs.find((log) => log.id === editingLogId) ?? null,
@@ -928,6 +941,35 @@ function App() {
   }, [aiAnalyses]);
 
   useEffect(() => {
+    let active = true;
+    void draft.start().then(() => {
+      if (active && !draftStarted.current && draft.getSnapshot().ready) {
+        draftStarted.current = true;
+        setSelectedDate(draft.getSnapshot().content.date);
+      }
+    });
+    const refreshDrafts = () => { void draft.refresh(); };
+    window.addEventListener("focus", refreshDrafts);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshDrafts);
+    };
+  }, [draft]);
+
+  function updateNewDraft(patch: Parameters<ComposerDraft["update"]>[0]) {
+    draft.update({ date: draftDate, ...patch });
+  }
+
+  async function discardNewDraft() {
+    if (await draft.discard()) {
+      imagePreparationId.current += 1;
+      if (imageInputRef.current) imageInputRef.current.value = "";
+      setSubmitMessage("");
+    }
+    setIsDiscardConfirmOpen(false);
+  }
+
+  useEffect(() => {
     setReviewCopyStatus(null);
   }, [reviewLogs, reviewRange, reviewTagFilter]);
 
@@ -985,7 +1027,7 @@ function App() {
   }, [editingLogId]);
 
   useEffect(() => {
-    if (!hasUnsavedEdit && !hasUnsavedAiAnalysisDraft) {
+    if (!hasUnsavedEdit && !hasUnsavedAiAnalysisDraft && !draftState.pending && !draftState.error && !isPreparingImage && !isSaving) {
       return;
     }
 
@@ -996,7 +1038,7 @@ function App() {
 
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit]);
+  }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit, draftState.pending, draftState.error, isPreparingImage, isSaving]);
 
   useEffect(() => {
     if (!composerGuideStep) {
@@ -1449,79 +1491,50 @@ function App() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
-    if (!canSubmit) {
-      return;
-    }
-
-    setIsSaving(true);
+    if (!canSubmit) return;
     setSubmitMessage("");
-
-    const now = new Date();
-    const entry: LogEntry = {
-      id: crypto.randomUUID(),
-      date: selectedDate,
-      createdAt: now.toISOString(),
-      text: trimmedText,
-      tags: selectedTags,
-      images: pendingImage ? [pendingImage] : [],
-    };
-
-    try {
-      await db.logs.add(entry);
-      setLogs((currentLogs) => [...currentLogs, entry]);
-      setText("");
-      setSelectedTags([]);
-      setPendingImage(null);
-      if (imageInputRef.current) {
-        imageInputRef.current.value = "";
-      }
-    } catch (error) {
-      setSubmitMessage(
-        `${getDataWriteErrorMessage(
-          error,
-          "メモを保存できませんでした。もう一度試してください。",
-        )} 入力内容は残っています。`,
-      );
-    } finally {
-      setIsSaving(false);
+    await draft.save();
+    if (!draft.getSnapshot().error) {
+      // A date switch during a slow save must not insert the entry into another day.
+      const displayedDate = selectedDateRef.current;
+      const entries = await db.logs.where("date").equals(displayedDate).sortBy("createdAt").catch(() => null);
+      if (entries && selectedDateRef.current === displayedDate) setLogs(entries.map(normalizeLog));
+      else if (!entries) setSubmitMessage("記録は保存できました。表示を更新するには日付を開き直してください。");
+    }
+    if (!draft.getSnapshot().content.images.length && imageInputRef.current) {
+      imageInputRef.current.value = "";
     }
   }
 
   async function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    setSubmitMessage("画像を準備しています。");
-
+    if (!file) return;
+    const preparationId = ++imagePreparationId.current;
+    const imageDate = draftDate;
+    setIsPreparingImage(true);
+    setSubmitMessage("画像を準備しています。この表示が消えるまで画面を閉じないでください。");
     try {
-      setPendingImage(await prepareImage(file));
+      const image = await prepareImage(file);
+      if (preparationId !== imagePreparationId.current) return;
+      draft.update({ date: hasDraftContent(draft.getSnapshot().content) ? draft.getSnapshot().content.date : imageDate, images: [image] });
       setSubmitMessage("");
     } catch {
-      setPendingImage(null);
-      setSubmitMessage("画像を読み込めませんでした。別の画像で試してください。");
-      if (imageInputRef.current) {
-        imageInputRef.current.value = "";
-      }
+      setSubmitMessage("画像を読み込めませんでした。本文と元の添付画像は残っています。別の画像で試してください。");
+    } finally {
+      if (preparationId === imagePreparationId.current) setIsPreparingImage(false);
     }
   }
 
   function clearPendingImage() {
-    setPendingImage(null);
-    if (imageInputRef.current) {
-      imageInputRef.current.value = "";
-    }
+    imagePreparationId.current += 1;
+    updateNewDraft({ images: [] });
+    if (imageInputRef.current) imageInputRef.current.value = "";
   }
 
   function toggleTag(tag: LogTag) {
-    setSelectedTags((currentTags) =>
-      currentTags.includes(tag)
-        ? currentTags.filter((currentTag) => currentTag !== tag)
-        : [...currentTags, tag],
-    );
+    updateNewDraft({ tags: selectedTags.includes(tag)
+      ? selectedTags.filter((currentTag) => currentTag !== tag)
+      : [...selectedTags, tag] });
   }
 
   function toggleFilterTag(tag: LogTag) {
@@ -2812,6 +2825,34 @@ function App() {
         ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
+          <div className="draft-status">
+            <p role={draftState.error ? "alert" : "status"}>
+              {draftState.error || (!draftState.ready ? "書きかけを確認しています…" : draftState.pending ? "書きかけを自動保存中…" : draftState.notice || (hasNewDraft ? "書きかけを自動保存しました。" : "書きかけは自動保存されます。"))}
+            </p>
+            {hasNewDraft ? <span>書きかけの日付：{formatDisplayDate(draftDate)}</span> : null}
+            {draftState.error ? <button type="button" disabled={draftState.busy || isSaving} onClick={() => {
+              if (draftState.ready) draft.retry();
+              else void draft.start().then(() => {
+                if (draft.getSnapshot().ready) setSelectedDate(draft.getSnapshot().content.date);
+              });
+            }}>再試行</button> : null}
+            {hasNewDraft && !isDiscardConfirmOpen ? <button type="button" onClick={() => setIsDiscardConfirmOpen(true)} disabled={composerDisabled || isSaving || isPreparingImage}>書きかけを破棄</button> : null}
+            {isDiscardConfirmOpen ? (
+              <div className="draft-discard-confirm" role="group" aria-label="書きかけの破棄を確認">
+                <p role="alert">この書きかけを破棄しますか？本文・タグ・添付画像が消えます。保存済みの記録は消えません。</p>
+                <button type="button" onClick={() => setIsDiscardConfirmOpen(false)} disabled={draftState.busy} autoFocus>残す</button>
+                <button type="button" onClick={() => void discardNewDraft()} disabled={draftState.busy}>破棄する</button>
+              </div>
+            ) : null}
+            <details onToggle={(event) => { if (event.currentTarget.open) void draft.refresh(); }}>
+              <summary>ほかの書きかけを確認</summary>
+              {draftState.alternatives.length ? draftState.alternatives.map((row) => (
+                <button type="button" key={row.id} disabled={composerDisabled || isSaving || isPreparingImage} onClick={() => void draft.open(row.id).then(() => setSelectedDate(draft.getSnapshot().content.date))}>
+                  {row.content ? formatDisplayDate(row.content.date) : ""}：{row.content?.text.slice(0, 30) || "タグ・画像の書きかけ"}
+                </button>
+              )) : <span>ほかの書きかけはありません。</span>}
+            </details>
+          </div>
           {submitMessage ? <p className="composer-message">{submitMessage}</p> : null}
           {composerGuideStep === "tags" ? (
             <div className="composer-guide" role="region" aria-label="タグの入力案内">
@@ -2831,6 +2872,7 @@ function App() {
                   type="button"
                   key={tag}
                   onClick={() => toggleTag(tag)}
+                  disabled={composerDisabled}
                   aria-pressed={isSelected}
                 >
                   {tag}
@@ -2842,7 +2884,7 @@ function App() {
             <div className="attachment-preview">
               {pendingImageUrl ? <img alt={pendingImage.name} src={pendingImageUrl} /> : null}
               <span>{pendingImage.name}</span>
-              <button type="button" onClick={clearPendingImage}>
+              <button type="button" onClick={clearPendingImage} disabled={composerDisabled || isPreparingImage}>
                 削除
               </button>
             </div>
@@ -2853,6 +2895,7 @@ function App() {
             type="file"
             accept="image/*"
             onChange={handleImageChange}
+            disabled={composerDisabled || isPreparingImage || isSaving}
           />
           {composerGuideStep === "text" ? (
             <div className="composer-guide composer-text-guide" role="status">
@@ -2864,6 +2907,7 @@ function App() {
             type="button"
             onClick={() => imageInputRef.current?.click()}
             aria-label="画像を添付"
+            disabled={composerDisabled || isPreparingImage || isSaving}
           >
             画像
           </button>
@@ -2874,7 +2918,8 @@ function App() {
             rows={1}
             value={text}
             onFocus={() => setComposerGuideStep(null)}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => updateNewDraft({ text: event.target.value })}
+            disabled={composerDisabled}
           />
           <button className="send-button" type="submit" disabled={!canSubmit}>
             {isSaving ? "保存中" : "保存"}
