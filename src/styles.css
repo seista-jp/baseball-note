@@ -3183,3 +3183,47 @@ h1 {
 }
 .draft-discard-confirm button { margin: 8px 8px 0 0; }
 .draft-status details[open] { max-height: 140px; overflow-y: auto; }
+
+/* Screen-design update: the composer is a short, clear sequence on small screens. */
+.composer-title { grid-column: 1 / -1; margin: 0; font-size: 20px; line-height: 1.35; }
+.composer-tags { grid-column: 1 / -1; order: 3; max-width: 680px; }
+.composer-tags summary { cursor: pointer; color: #52594a; font-size: 14px; font-weight: 700; padding: 8px 0; }
+.composer textarea { order: 2; grid-column: 1 / -1; min-height: 92px; max-height: 260px; resize: none; }
+.composer .attach-button { order: 4; justify-self: start; min-height: 38px; height: 38px; font-size: 13px; }
+.composer .send-button { order: 5; grid-column: 1 / -1; width: 100%; min-height: 48px; }
+.composer .draft-status { order: 1; }
+.composer .composer-title { order: 1; }
+.composer .composer-message, .composer .attachment-preview { order: 4; }
+.review-summary { display: flex; flex-wrap: wrap; gap: 6px 14px; color: #66645c; font-size: 13px; }
+.review-compact-note { margin: 0; color: #77756d; font-size: 13px; line-height: 1.5; }
+.review-period button { border-color: #cfd2c7; background: #ffffff; color: #3f4734; }
+.review-period button:hover { background: #eef2e8; }
+.analysis-highlights { display: grid; gap: 10px; border: 1px solid #d6dfc8; border-radius: 12px; background: #f5f8ef; padding: 14px; }
+.analysis-highlights span { color: #64734c; font-size: 12px; font-weight: 700; }
+.analysis-highlights p { margin: 4px 0 0; line-height: 1.6; white-space: pre-wrap; }
+.analysis-highlights button { justify-self: start; min-height: 42px; border: 1px solid #6a784f; border-radius: 8px; background: #ffffff; color: #374424; font-weight: 700; padding: 8px 12px; }
+.bottom-navigation { display: none; }
+
+@media (max-width: 760px) {
+  .app-shell { padding-bottom: calc(66px + env(safe-area-inset-bottom)); }
+  .bottom-navigation { position: fixed; right: 0; bottom: 0; left: 0; z-index: 25; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #deddD5; background: rgba(251, 251, 250, .97); padding: 7px 8px calc(7px + env(safe-area-inset-bottom)); box-shadow: 0 -6px 18px rgba(30,30,25,.08); }
+  .bottom-navigation button { display: grid; min-height: 48px; place-items: center; gap: 2px; border: 0; border-radius: 9px; background: transparent; color: #68675f; font: inherit; font-size: 11px; font-weight: 650; }
+  .bottom-navigation button.active { background: #eaf0df; color: #40502d; }
+  .sidebar { z-index: 35; }
+  /* The record screen must flow from the header; do not reserve the remaining
+     viewport height for an empty log list before showing the composer. */
+  .main-pane:not(.summary-pane) { display: block; overflow-y: auto; max-height: none; }
+  .main-pane:not(.summary-pane) .log-list { overflow: visible; padding: 12px 16px 0; }
+  .composer { position: static; grid-template-columns: 1fr; padding: 18px 16px 20px; box-shadow: none; }
+  .composer-title { font-size: 21px; }
+  .composer .draft-status { font-size: 12px; }
+  .composer textarea { width: 100%; min-height: 92px; }
+  .composer .attach-button { min-width: auto; padding: 6px 10px; }
+  .composer .tag-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .composer .tag-toggle { min-width: 0; min-height: 44px; font-size: 13px; line-height: 1.2; padding: 8px 4px; white-space: normal; }
+  .review-list, .ai-analysis-list, .ai-analysis-scroll-area, .information-page { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+  .review-summary { font-size: 12px; }
+  .review-period button { width: auto; min-height: 44px; border-color: #cfd2c7; background: #ffffff; color: #3f4734; padding: 8px 12px; }
+  .review-period button:hover { background: #eef2e8; }
+  .ai-analysis-heading-row .ai-analysis-primary-button { width: auto; min-height: 38px; padding: 7px 10px; }
+}

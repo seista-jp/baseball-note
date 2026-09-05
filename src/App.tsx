@@ -18,6 +18,10 @@ import {
   ShieldCheck,
   Tag,
   Upload,
+  BookOpen,
+  Home,
+  MoreHorizontal,
+  Plus,
 } from "lucide-react";
 import {
   BackupValidationError,
@@ -52,6 +56,7 @@ const inlineEditHintStorageKey = "baseball-note-inline-edit-hint-dismissed";
 const lastBackupAtStorageKey = "baseball-note-last-backup-at";
 const onboardingCompletedStorageKey = "baseball-note-onboarding-completed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
+const chosenFocusStorageKey = "baseball-note-chosen-focus";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
 const primaryFocusMarker = "【今、一番意識していること】";
 const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球の記録です。
@@ -128,6 +133,37 @@ type ReviewCopyStatus = {
   kind: "success" | "error";
   message: string;
 };
+
+type AnalysisHighlights = { insight: string | null; nextStep: string | null };
+
+function loadChosenFocus(): string | null {
+  try {
+    const value = window.localStorage.getItem(chosenFocusStorageKey)?.trim();
+    return value || null;
+  } catch { return null; }
+}
+
+function extractSectionValue(text: string, heading: "一番の気づき" | "次に試すこと"): string | null {
+  const lines = text.split(/\r?\n/);
+  const index = lines.findIndex((line) => line.trim()
+    .replace(/^[-*#\d.\s]*/, "").replace(/^[【\[]/, "").startsWith(heading));
+  if (index < 0) return null;
+  const inline = lines[index].replace(/^.*?(一番の気づき|次に試すこと)[】\]]?[:：]?\s*/, "").trim();
+  if (inline && inline !== heading) return inline;
+  return lines.slice(index + 1).map((line) => line.trim()).find((line) => Boolean(line) && !/^[【\[].*[】\]]$/.test(line)) ?? null;
+}
+
+export function extractAnalysisHighlights(text: string): AnalysisHighlights | null {
+  const insight = extractSectionValue(text, "一番の気づき");
+  const nextStep = extractSectionValue(text, "次に試すこと");
+  return insight || nextStep ? { insight, nextStep } : null;
+}
+
+export function extractAnalysisExcerpt(text: string): string {
+  return extractSectionValue(text, "一番の気づき")
+    ?? text.split(/\r?\n/).map((line) => line.trim()).find((line) => Boolean(line) && !/^[【\[].*[】\]]$/.test(line))
+    ?? text;
+}
 
 type StoredLogEntry = Omit<LogEntry, "images" | "tags"> &
   Partial<Pick<LogEntry, "images" | "tags">>;
@@ -772,9 +808,10 @@ function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
   const [reviewLogs, setReviewLogs] = useState<LogEntry[]>([]);
-  const [reviewRange, setReviewRange] = useState<DateRange | null>(loadSavedReviewRange);
+  const [reviewRange, setReviewRange] = useState<DateRange | null>(null);
   const [reviewTagFilter, setReviewTagFilter] = useState<ReviewTagFilter>("すべて");
   const [reviewCopyStatus, setReviewCopyStatus] = useState<ReviewCopyStatus | null>(null);
+  const [chosenFocus, setChosenFocus] = useState<string | null>(loadChosenFocus);
   const [aiAnalyses, setAiAnalyses] = useState<AiAnalysis[]>([]);
   const [aiAnalysisScreen, setAiAnalysisScreen] = useState<AiAnalysisScreen>("list");
   const [selectedAiAnalysis, setSelectedAiAnalysis] = useState<AiAnalysis | null>(null);
@@ -851,6 +888,7 @@ function App() {
     }
   });
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const composerTagsRef = useRef<HTMLDetailsElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const editingTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -929,6 +967,7 @@ function App() {
     return Array.from(groups, ([date, dayLogs]) => ({ date, logs: dayLogs }));
   }, [filteredReviewLogs]);
   const primaryFocus = useMemo(() => {
+    if (chosenFocus) return chosenFocus;
     for (const analysis of aiAnalyses) {
       const focus = extractPrimaryFocus(analysis.text);
 
@@ -938,7 +977,7 @@ function App() {
     }
 
     return null;
-  }, [aiAnalyses]);
+  }, [aiAnalyses, chosenFocus]);
 
   useEffect(() => {
     let active = true;
@@ -1222,7 +1261,9 @@ function App() {
   }
 
   function showRecordReview() {
-    setIsRangePickerOpen(true);
+    if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) return;
+    setViewMode("review");
+    setReviewCopyStatus(null);
     closeMenu();
   }
 
@@ -1267,6 +1308,7 @@ function App() {
   }
 
   function openRangePicker() {
+    setReviewRange((current) => current ?? loadSavedReviewRange());
     setIsRangePickerOpen(true);
   }
 
@@ -1284,6 +1326,12 @@ function App() {
     saveReviewRange(range);
     setViewMode("review");
     setIsRangePickerOpen(false);
+  }
+
+  function chooseFocus(nextStep: string) {
+    try { window.localStorage.setItem(chosenFocusStorageKey, nextStep); } catch { /* 現在の画面では表示する。 */ }
+    setChosenFocus(nextStep);
+    setAiAnalysisNotice("「今、一番意識していること」に反映しました。");
   }
 
   function openSearchResult(log: LogEntry) {
@@ -1380,7 +1428,7 @@ function App() {
     let isActive = true;
 
     async function loadReviewLogs() {
-      if (!isReviewView || !reviewRange) {
+      if (!isReviewView) {
         setReviewLogs([]);
         setReviewLoadError("");
         setIsReviewLoading(false);
@@ -1391,13 +1439,12 @@ function App() {
       setReviewLoadError("");
 
       try {
-        const entries = await db.logs
-          .where("date")
-          .between(reviewRange.start, reviewRange.end, true, true)
-          .toArray();
+        const entries = reviewRange
+          ? await db.logs.where("date").between(reviewRange.start, reviewRange.end, true, true).toArray()
+          : await db.logs.orderBy("createdAt").reverse().toArray();
 
         if (isActive) {
-          setReviewLogs(sortLogsByDate(entries));
+          setReviewLogs(reviewRange ? sortLogsByDate(entries) : entries.map(normalizeLog));
         }
       } catch {
         if (isActive) {
@@ -1481,6 +1528,10 @@ function App() {
     return () => URL.revokeObjectURL(url);
   }, [pendingImage]);
 
+  useEffect(() => {
+    if (composerTextareaRef.current) resizeTextarea(composerTextareaRef.current);
+  }, [text]);
+
   const emptyMessage = useMemo(() => {
     if (isToday) {
       return "今日の感覚を短く書いて保存します。";
@@ -1493,7 +1544,10 @@ function App() {
     event.preventDefault();
     if (!canSubmit) return;
     setSubmitMessage("");
-    await draft.save();
+    const saved = await draft.save();
+    if (saved) {
+      composerTagsRef.current?.removeAttribute("open");
+    }
     if (!draft.getSnapshot().error) {
       // A date switch during a slow save must not insert the entry into another day.
       const displayedDate = selectedDateRef.current;
@@ -1619,7 +1673,7 @@ function App() {
         sortAiAnalysesNewest([...currentAnalyses, analysis]),
       );
       setAiAnalysisText("");
-      setAiAnalysisNotice("AI分析を保存しました。");
+      setAiAnalysisNotice("まとめを保存しました。");
       setAiAnalysisScreen("list");
     } catch (error) {
       setAiAnalysisFormMessage(
@@ -2061,32 +2115,6 @@ function App() {
 
         <nav className="nav-list">
           <button
-            className={isReviewView ? "nav-item active" : "nav-item"}
-            type="button"
-            onClick={showRecordReview}
-          >
-            <CalendarDays
-              className="nav-item-icon"
-              size={menuIconSize}
-              strokeWidth={menuIconStrokeWidth}
-              aria-hidden="true"
-            />
-            <span>振り返り</span>
-          </button>
-          <button
-            className={isAiAnalysisView ? "nav-item active" : "nav-item"}
-            type="button"
-            onClick={showAiAnalysisView}
-          >
-            <FileText
-              className="nav-item-icon"
-              size={menuIconSize}
-              strokeWidth={menuIconStrokeWidth}
-              aria-hidden="true"
-            />
-            <span>AI分析</span>
-          </button>
-          <button
             className={isSearchView ? "nav-item active" : "nav-item"}
             type="button"
             onClick={showSearchView}
@@ -2247,18 +2275,22 @@ function App() {
           <section className="review-screen" aria-label="記録を振り返る">
             <header className="review-header">
               <h1>記録を振り返る</h1>
-              {reviewRange ? (
-                <>
-                  <div className="review-period">
-                    <p aria-label="表示中の期間">
+              <div className="review-summary" aria-label="記録の概要">
+                <span>これまでの記録 {reviewLogs.length}件</span>
+                {reviewLogs.length > 0 ? <span>最近よく使った分類：{Object.entries(reviewLogs.flatMap((log) => log.tags).reduce<Record<string, number>>((counts, tag) => ({ ...counts, [tag]: (counts[tag] ?? 0) + 1 }), {})).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([tag]) => tag).join("・") || "なし"}</span> : null}
+              </div>
+              <div className="review-period">
+                <p aria-label="表示中の期間">
+                  {reviewRange ? <>
                       <time dateTime={reviewRange.start}>{formatJapaneseDate(reviewRange.start)}</time>
                       <span aria-hidden="true">〜</span>
                       <time dateTime={reviewRange.end}>{formatJapaneseDate(reviewRange.end)}</time>
-                    </p>
-                    <button type="button" onClick={openRangePicker}>
-                      期間を変更
-                    </button>
-                  </div>
+                    </> : "最近の記録"}
+                </p>
+                <button type="button" onClick={openRangePicker}>期間を変更</button>
+              </div>
+              {reviewRange ? (
+                <>
                   <div className="review-filter">
                     <span className="review-filter-label">タグ</span>
                     <div className="review-filter-options" aria-label="振り返りをタグで絞り込み">
@@ -2301,11 +2333,11 @@ function App() {
                     </p>
                   ) : null}
                 </>
-              ) : null}
+              ) : <p className="review-compact-note">期間を選ぶと、分類で絞り込みやAI用コピーが使えます。</p>}
             </header>
 
             <div className="review-list" aria-live="polite">
-              {!reviewRange ? null : isReviewLoading ? (
+              {isReviewLoading ? (
                 <div className="empty-state">読み込み中...</div>
               ) : reviewLoadError ? (
                 <div className="empty-state data-error-state" role="alert">
@@ -2370,19 +2402,19 @@ function App() {
             </div>
           </section>
         ) : isAiAnalysisView ? (
-          <section className="ai-analysis-screen" aria-label="AI分析">
+          <section className="ai-analysis-screen" aria-label="まとめ">
             {aiAnalysisScreen === "list" ? (
               <>
                 <header className="ai-analysis-list-header">
                   <div className="ai-analysis-heading-row">
-                    <h1>AI分析</h1>
+                    <h1>まとめ</h1>
                     <button
                       className="ai-analysis-primary-button"
                       type="button"
                       onClick={openAiAnalysisSaveScreen}
                       autoFocus
                     >
-                      ＋ AI分析を保存
+                      <Plus aria-hidden="true" size={17} /> 新しく保存
                     </button>
                   </div>
                   {aiAnalysisNotice ? (
@@ -2400,7 +2432,7 @@ function App() {
                       {aiAnalysisLoadError}
                     </div>
                   ) : aiAnalyses.length === 0 ? (
-                    <div className="empty-state">保存したAI分析はまだありません。</div>
+                    <div className="empty-state">保存したまとめはまだありません。</div>
                   ) : (
                     aiAnalyses.map((analysis) => (
                       <button
@@ -2424,7 +2456,7 @@ function App() {
                             保存 {formatSavedDate(analysis.createdAt)}
                           </time>
                         </span>
-                        <span className="ai-analysis-excerpt">{analysis.text}</span>
+                        <span className="ai-analysis-excerpt">{extractAnalysisExcerpt(analysis.text)}</span>
                       </button>
                     ))
                   )}
@@ -2441,7 +2473,7 @@ function App() {
                   >
                     ← 一覧へ戻る
                   </button>
-                  <h1>AI分析を保存</h1>
+                  <h1>まとめを保存</h1>
 
                   <form className="ai-analysis-form" onSubmit={handleSaveAiAnalysis}>
                     <fieldset className="ai-analysis-fieldset">
@@ -2502,11 +2534,11 @@ function App() {
                     </fieldset>
 
                     <label className="ai-analysis-field">
-                      <span>AI分析結果</span>
+                      <span>まとめの本文</span>
                       <textarea
                         className="ai-analysis-result-input"
                         value={aiAnalysisText}
-                        placeholder="ChatGPTなどの分析結果を貼り付けてください"
+                        placeholder="外部AIの分析結果を貼り付けてください"
                         onChange={(event) => {
                           setAiAnalysisText(event.target.value);
                           setAiAnalysisFormMessage("");
@@ -2544,7 +2576,7 @@ function App() {
                   </button>
                   {selectedAiAnalysis ? (
                     <article className="ai-analysis-detail">
-                      <h1>AI分析</h1>
+                      <h1>まとめ</h1>
                       <dl className="ai-analysis-detail-meta">
                         <div>
                           <dt>期間</dt>
@@ -2571,7 +2603,16 @@ function App() {
                           </dd>
                         </div>
                       </dl>
-                      <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>
+                      {(() => {
+                        const highlights = extractAnalysisHighlights(selectedAiAnalysis.text);
+                        return highlights ? <>
+                          <section className="analysis-highlights" aria-label="まとめの要点">
+                            {highlights.insight ? <div><span>一番の気づき</span><p>{highlights.insight}</p></div> : null}
+                            {highlights.nextStep ? <div><span>次に試すこと</span><p>{highlights.nextStep}</p><button type="button" onClick={() => chooseFocus(highlights.nextStep!)}>これを意識する</button></div> : null}
+                          </section>
+                          <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>
+                        </> : <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>;
+                      })()}
                     </article>
                   ) : (
                     <div className="empty-state">AI分析を表示できませんでした。</div>
@@ -2825,6 +2866,7 @@ function App() {
         ) : null}
 
         <form className="composer" onSubmit={handleSubmit}>
+          <h2 className="composer-title">今の気づきを残す</h2>
           <div className="draft-status">
             <p role={draftState.error ? "alert" : "status"}>
               {draftState.error || (!draftState.ready ? "書きかけを確認しています…" : draftState.pending ? "書きかけを自動保存中…" : draftState.notice || (hasNewDraft ? "書きかけを自動保存しました。" : "書きかけは自動保存されます。"))}
@@ -2862,7 +2904,9 @@ function App() {
               </button>
             </div>
           ) : null}
-          <div className="tag-picker" aria-label="タグを選択">
+          <details className="composer-tags" ref={composerTagsRef}>
+            <summary>分類を追加{selectedTags.length ? `（${selectedTags.join("・")}）` : ""}</summary>
+          <div className="tag-picker" aria-label="分類を選択">
             {logTags.map((tag) => {
               const isSelected = selectedTags.includes(tag);
 
@@ -2880,6 +2924,7 @@ function App() {
               );
             })}
           </div>
+          </details>
           {pendingImage ? (
             <div className="attachment-preview">
               {pendingImageUrl ? <img alt={pendingImage.name} src={pendingImageUrl} /> : null}
@@ -2906,19 +2951,19 @@ function App() {
             className="attach-button"
             type="button"
             onClick={() => imageInputRef.current?.click()}
-            aria-label="画像を添付"
+            aria-label="画像を追加"
             disabled={composerDisabled || isPreparingImage || isSaving}
           >
-            画像
+            画像を追加
           </button>
           <textarea
             ref={composerTextareaRef}
             aria-label="メモ"
             placeholder="例: 外角を逆方向へ押せた"
-            rows={1}
+            rows={3}
             value={text}
             onFocus={() => setComposerGuideStep(null)}
-            onChange={(event) => updateNewDraft({ text: event.target.value })}
+            onChange={(event) => { updateNewDraft({ text: event.target.value }); resizeTextarea(event.currentTarget); }}
             disabled={composerDisabled}
           />
           <button className="send-button" type="submit" disabled={!canSubmit}>
@@ -2928,6 +2973,20 @@ function App() {
           </>
         )}
       </main>
+      <nav className="bottom-navigation" aria-label="主な画面">
+        <button className={isLogView ? "active" : ""} type="button" onClick={showTodayView}>
+          <Home aria-hidden="true" size={20} /><span>記録</span>
+        </button>
+        <button className={isReviewView ? "active" : ""} type="button" onClick={showRecordReview}>
+          <BookOpen aria-hidden="true" size={20} /><span>振り返り</span>
+        </button>
+        <button className={isAiAnalysisView ? "active" : ""} type="button" onClick={showAiAnalysisView}>
+          <FileText aria-hidden="true" size={20} /><span>まとめ</span>
+        </button>
+        <button className={isMenuOpen ? "active" : ""} type="button" onClick={() => setIsMenuOpen((open) => !open)} aria-expanded={isMenuOpen}>
+          <MoreHorizontal aria-hidden="true" size={20} /><span>その他</span>
+        </button>
+      </nav>
       {isRangePickerOpen ? (
         <RecordReviewCalendar
           currentRange={reviewRange}

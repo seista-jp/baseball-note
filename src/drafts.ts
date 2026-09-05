@@ -252,7 +252,7 @@ export class ComposerDraft {
         if (this.sequence === submittedSequence) {
           this.publish({ content: emptyDraft(content.date) });
         }
-        this.publish({ error: "", notice: outcome === "saved" ? "記録を保存しました。" : "この書きかけは別のタブですでに保存されています。" });
+        this.publish({ error: "", notice: outcome === "saved" ? "記録しました。" : "この書きかけは別のタブですでに保存されています。" });
         return outcome === "saved" ? entry : null;
       } catch (error) {
         this.publish({
