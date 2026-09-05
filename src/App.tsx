@@ -57,6 +57,7 @@ const lastBackupAtStorageKey = "baseball-note-last-backup-at";
 const onboardingCompletedStorageKey = "baseball-note-onboarding-completed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 const chosenFocusStorageKey = "baseball-note-chosen-focus";
+export const focusReflectionNoticeText = "記録画面の『今、一番意識していること』に反映しました";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
 const primaryFocusMarker = "【今、一番意識していること】";
 const aiAnalysisPrompt = `以下は、本人がBaseball Noteに残した野球の記録です。
@@ -141,6 +142,11 @@ function loadChosenFocus(): string | null {
     const value = window.localStorage.getItem(chosenFocusStorageKey)?.trim();
     return value || null;
   } catch { return null; }
+}
+
+export function saveChosenFocus(value: string): string {
+  try { window.localStorage.setItem(chosenFocusStorageKey, value); } catch { /* 現在の画面では反映する。 */ }
+  return value;
 }
 
 function extractSectionValue(text: string, heading: "一番の気づき" | "次に試すこと"): string | null {
@@ -821,6 +827,7 @@ function App() {
   const [aiAnalysisText, setAiAnalysisText] = useState("");
   const [aiAnalysisFormMessage, setAiAnalysisFormMessage] = useState("");
   const [aiAnalysisNotice, setAiAnalysisNotice] = useState("");
+  const [focusReflectionNotice, setFocusReflectionNotice] = useState("");
   const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
   const [draft] = useState(() => new ComposerDraft(db, todayKey));
   const draftState = useSyncExternalStore(draft.subscribe, draft.getSnapshot);
@@ -1294,6 +1301,7 @@ function App() {
   function openAiAnalysisDetail(analysis: AiAnalysis) {
     setSelectedAiAnalysis(analysis);
     setAiAnalysisNotice("");
+    setFocusReflectionNotice("");
     setAiAnalysisScreen("detail");
   }
 
@@ -1304,6 +1312,7 @@ function App() {
 
     setAiAnalysisFormMessage("");
     setSelectedAiAnalysis(null);
+    setFocusReflectionNotice("");
     setAiAnalysisScreen("list");
   }
 
@@ -1329,9 +1338,8 @@ function App() {
   }
 
   function chooseFocus(nextStep: string) {
-    try { window.localStorage.setItem(chosenFocusStorageKey, nextStep); } catch { /* 現在の画面では表示する。 */ }
-    setChosenFocus(nextStep);
-    setAiAnalysisNotice("「今、一番意識していること」に反映しました。");
+    setChosenFocus(saveChosenFocus(nextStep));
+    setFocusReflectionNotice(focusReflectionNoticeText);
   }
 
   function openSearchResult(log: LogEntry) {
@@ -2608,7 +2616,7 @@ function App() {
                         return highlights ? <>
                           <section className="analysis-highlights" aria-label="まとめの要点">
                             {highlights.insight ? <div><span>一番の気づき</span><p>{highlights.insight}</p></div> : null}
-                            {highlights.nextStep ? <div><span>次に試すこと</span><p>{highlights.nextStep}</p><button type="button" onClick={() => chooseFocus(highlights.nextStep!)}>これを意識する</button></div> : null}
+                            {highlights.nextStep ? <div><span>次に試すこと</span><p>{highlights.nextStep}</p><button type="button" onClick={() => chooseFocus(highlights.nextStep!)}>これを意識する</button>{focusReflectionNotice ? <p className="focus-reflection-notice" aria-live="polite">{focusReflectionNotice}</p> : null}</div> : null}
                           </section>
                           <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>
                         </> : <div className="ai-analysis-detail-body">{selectedAiAnalysis.text}</div>;

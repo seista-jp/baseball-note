@@ -3202,6 +3202,7 @@ h1 {
 .analysis-highlights span { color: #64734c; font-size: 12px; font-weight: 700; }
 .analysis-highlights p { margin: 4px 0 0; line-height: 1.6; white-space: pre-wrap; }
 .analysis-highlights button { justify-self: start; min-height: 42px; border: 1px solid #6a784f; border-radius: 8px; background: #ffffff; color: #374424; font-weight: 700; padding: 8px 12px; }
+.focus-reflection-notice { margin: 8px 0 0; color: #40522d; font-size: 13px; font-weight: 650; line-height: 1.55; }
 .bottom-navigation { display: none; }
 
 @media (max-width: 760px) {

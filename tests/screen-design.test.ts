@@ -1,4 +1,4 @@
-import { extractAnalysisExcerpt, extractAnalysisHighlights } from "../src/App";
+import { extractAnalysisExcerpt, extractAnalysisHighlights, focusReflectionNoticeText, saveChosenFocus } from "../src/App";
 
 const output = document.querySelector<HTMLPreElement>("#results")!;
 const button = document.querySelector<HTMLButtonElement>("#run")!;
@@ -12,7 +12,10 @@ button.addEventListener("click", () => {
     assert(highlights?.nextStep === "最初の3球は力を抜く", "次に試すことを読めません");
     assert(extractAnalysisExcerpt(detailed) === "力を抜くと前へ運べた", "一覧に見出しが残っています");
     assert(extractAnalysisExcerpt("\n振り返りの本文\n次の行") === "振り返りの本文", "見出しがない本文を読めません");
-    output.textContent = "2/2 成功\n見出しの本文表示と、本人操作用の次に試すことを確認しました。";
+    const nextStep = saveChosenFocus("最初の3球は力を抜く");
+    assert(window.localStorage.getItem("baseball-note-chosen-focus") === nextStep, "意識内容を保存できません");
+    assert(focusReflectionNoticeText === "記録画面の『今、一番意識していること』に反映しました", "反映案内が正しくありません");
+    output.textContent = "3/3 成功\n見出しの本文表示、本人操作用の次に試すこと、意識内容の保存を確認しました。";
   } catch (error) {
     output.textContent = `失敗: ${error instanceof Error ? error.message : String(error)}`;
   }
