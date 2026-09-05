@@ -5,6 +5,7 @@ const button = document.querySelector<HTMLButtonElement>("#run")!;
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
 
 button.addEventListener("click", () => {
+  const previousFocus = window.localStorage.getItem("baseball-note-chosen-focus");
   try {
     const detailed = "【一番の気づき】\n力を抜くと前へ運べた\n\n【次に試すこと】\n最初の3球は力を抜く";
     const highlights = extractAnalysisHighlights(detailed);
@@ -18,5 +19,8 @@ button.addEventListener("click", () => {
     output.textContent = "3/3 成功\n見出しの本文表示、本人操作用の次に試すこと、意識内容の保存を確認しました。";
   } catch (error) {
     output.textContent = `失敗: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    if (previousFocus === null) window.localStorage.removeItem("baseball-note-chosen-focus");
+    else window.localStorage.setItem("baseball-note-chosen-focus", previousFocus);
   }
 });

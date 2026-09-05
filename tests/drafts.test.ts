@@ -1,6 +1,6 @@
 import Dexie from "dexie";
 import { createDatabase, type BaseballDatabase } from "../src/db";
-import { ComposerDraft } from "../src/drafts";
+import { ComposerDraft, createDraftId } from "../src/drafts";
 import { buildBackupFile, validateBackup } from "../src/backup";
 import type { LogEntry } from "../src/types";
 
@@ -21,6 +21,12 @@ async function session(db: BaseballDatabase, text?: string) {
 async function active(db: BaseballDatabase) { return db.composerDrafts.where("state").equals("active").toArray(); }
 const picture = () => ({id: "image-test", name: "test.jpg", type: "image/jpeg", createdAt: "2026-09-01T00:00:00.000Z", blob: new Blob([new Uint8Array([255,216,255,217])], {type: "image/jpeg"})});
 
+ test("安全でない開発用URLでも下書きIDを作れる", async () => {
+  const first = createDraftId(null);
+  const second = createDraftId(null);
+  assert(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(first));
+  assert(first !== second, "下書きIDが重複しています");
+ });
  test("本文・過去日・タグ・画像が次回起動で復元され、正式記録にはならない", async db => {
   const d = await session(db);
   d.update({date: "2026-09-01", text: "調査用：力が入った", tags: ["打撃", "体調"], images: [picture()]});
@@ -40,18 +46,44 @@ const picture = () => ({id: "image-test", name: "test.jpg", type: "image/jpeg", 
   assert(!(await db.composerDrafts.toArray())[0].content);
   assert((await session(db)).getSnapshot().content.text === "");
  });
- test("保存失敗ではトランザクションが戻り、本文と画像と下書きを保持", async db => {
+ test("思い出すヒントは本文やタグを変えず、下書きと一緒に復元される", async db => {
+  const d = await session(db, "自分の言葉で書いた本文");
+  d.update({tags: ["打撃"], wordHints: {words: ["タイミング", "脱力"]}}); await d.settled();
+  const next = await session(db);
+  assert(next.getSnapshot().content.text === "自分の言葉で書いた本文");
+  equal(next.getSnapshot().content.tags, ["打撃"]);
+  equal(next.getSnapshot().content.wordHints.words, ["タイミング", "脱力"]);
+  assert(await db.logs.count() === 0);
+ });
+ test("ヒントだけでは正式記録を作らず、保存成功時に選択を消す", async db => {
+  const d = await session(db);
+  d.update({wordHints: {words: ["軸"]}}); await d.settled();
+  assert(await d.save() === null && await db.logs.count() === 0);
+  d.update({text: "本文を追加"}); await d.settled();
+  assert(await d.save());
+  equal(d.getSnapshot().content.wordHints.words, []);
+  assert((await session(db)).getSnapshot().content.wordHints.words.length === 0);
+ });
+ test("古い下書きにヒント項目がなくても安全に復元する", async db => {
+  await db.composerDrafts.add({id: "old-draft", revision: 1, updatedAt: new Date().toISOString(), state: "active", content: {date: "2026-09-05", text: "旧下書き", tags: [], images: []} as never});
+  const d = await session(db);
+  assert(d.getSnapshot().content.text === "旧下書き");
+  equal(d.getSnapshot().content.wordHints.words, []);
+ });
+ test("保存失敗では本文・画像・ヒント・下書きを保持し、成功時にヒントを消す", async db => {
   const d = await session(db, "失敗でも残る");
-  d.update({images:[picture()]}); await d.settled();
+  d.update({images:[picture()], wordHints: {words: ["タイミング", "軸"], prompt: "うまくいかなかった場面", activity: "打つ"}}); await d.settled();
   const fail = () => { throw new DOMException("test quota", "QuotaExceededError"); };
   db.logs.hook("creating", fail);
   assert(await d.save() === null);
   assert(d.getSnapshot().error.includes("保存容量が不足"));
   assert(d.getSnapshot().content.text === "失敗でも残る");
+  equal(d.getSnapshot().content.wordHints.words, ["タイミング", "軸"]);
   assert((await active(db))[0].content?.images[0].blob.size === 4);
   assert(await db.logs.count() === 0);
   db.logs.hook("creating").unsubscribe(fail);
   assert(await d.save());
+  equal(d.getSnapshot().content.wordHints.words, []);
  });
  test("下書き消去段階の失敗でも正式記録を残さず二重登録を防ぐ", async db => {
   const d = await session(db, "一括保存");
@@ -83,12 +115,13 @@ const picture = () => ({id: "image-test", name: "test.jpg", type: "image/jpeg", 
   await Promise.all([d.save(), d.save(), d.save()]);
   assert(await db.logs.count() === 1);
  });
- test("破棄と再起動。保存済みメモ・AI分析は維持", async db => {
+ test("破棄時にヒントも消え、保存済みメモ・AI分析は維持", async db => {
   const d = await session(db, "正式記録"); await d.save();
   await db.aiAnalyses.add({id:"ai-test",startDate:"2026-09-01",endDate:"2026-09-05",tag:"すべて",text:"分析",createdAt:new Date().toISOString()});
-  d.update({text: "破棄する本文", images:[picture()]}); await d.settled();
+  d.update({text: "破棄する本文", images:[picture()], wordHints: {words: ["脱力"], prompt: "引き続き意識していること", activity: "投げる"}}); await d.settled();
   assert(await d.discard());
   assert((await session(db)).getSnapshot().content.text === "");
+  equal((await session(db)).getSnapshot().content.wordHints.words, []);
   assert(await db.logs.count() === 1 && await db.aiAnalyses.count() === 1);
   assert((await active(db)).length === 0);
  });

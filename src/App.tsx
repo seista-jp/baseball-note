@@ -45,6 +45,13 @@ import {
 import { InformationScreen, type InformationPage } from "./InformationScreen";
 import { RecordReviewCalendar, type DateRange } from "./RecordReviewCalendar";
 import type { AiAnalysis, AiAnalysisTag, LogEntry, LogImage, LogTag } from "./types";
+import {
+  wordHintActivities,
+  wordHintDictionary,
+  wordHintPrompts,
+  type WordHintActivity,
+  type WordHintPrompt,
+} from "./wordHints";
 
 const todayKey = toDateKey(new Date());
 const logTags: LogTag[] = ["打撃", "守備", "走塁", "投球", "体調", "フィジカル"];
@@ -124,6 +131,7 @@ type AiAnalysisScreen = "list" | "save" | "detail";
 type OnboardingMode = "first-run" | "help" | null;
 type ComposerGuideStep = "tags" | "text" | null;
 type BackupDialogMode = "export" | "import" | null;
+type WordHintScreen = "prompts" | "activities" | "words" | null;
 
 type BackupSummary = {
   logCount: number;
@@ -833,6 +841,7 @@ function App() {
   const draftState = useSyncExternalStore(draft.subscribe, draft.getSnapshot);
   const text = draftState.content.text;
   const selectedTags = draftState.content.tags;
+  const selectedHintWords = draftState.content.wordHints.words;
   const pendingImage = draftState.content.images[0] ?? null;
   const isSaving = draftState.saving;
   const [isPreparingImage, setIsPreparingImage] = useState(false);
@@ -887,6 +896,9 @@ function App() {
     return hasCompletedOnboarding() ? null : "first-run";
   });
   const [composerGuideStep, setComposerGuideStep] = useState<ComposerGuideStep>(null);
+  const [wordHintScreen, setWordHintScreen] = useState<WordHintScreen>(null);
+  const [wordHintPrompt, setWordHintPrompt] = useState<WordHintPrompt | null>(null);
+  const [wordHintActivity, setWordHintActivity] = useState<WordHintActivity | null>(null);
   const [showInlineEditHint, setShowInlineEditHint] = useState(() => {
     try {
       return window.localStorage.getItem(inlineEditHintStorageKey) !== "1";
@@ -1004,6 +1016,38 @@ function App() {
 
   function updateNewDraft(patch: Parameters<ComposerDraft["update"]>[0]) {
     draft.update({ date: draftDate, ...patch });
+  }
+
+  function closeWordHints() {
+    setWordHintScreen(null);
+    window.setTimeout(() => composerTextareaRef.current?.focus({ preventScroll: true }), 0);
+  }
+
+  function openWordHints() {
+    setWordHintPrompt(draftState.content.wordHints.prompt ?? null);
+    setWordHintActivity(draftState.content.wordHints.activity ?? null);
+    setWordHintScreen(draftState.content.wordHints.prompt && draftState.content.wordHints.activity ? "words" : "prompts");
+  }
+
+  function chooseWordHintPrompt(prompt: WordHintPrompt) {
+    setWordHintPrompt(prompt);
+    setWordHintScreen("activities");
+  }
+
+  function chooseWordHintActivity(activity: WordHintActivity) {
+    setWordHintActivity(activity);
+    setWordHintScreen("words");
+  }
+
+  function toggleHintWord(word: string) {
+    const words = selectedHintWords.includes(word)
+      ? selectedHintWords.filter((current) => current !== word)
+      : [...selectedHintWords, word];
+    const prompt = wordHintPrompt ?? draftState.content.wordHints.prompt;
+    const activity = wordHintActivity ?? draftState.content.wordHints.activity;
+    updateNewDraft({
+      wordHints: words.length ? { words, prompt, activity } : { words },
+    });
   }
 
   async function discardNewDraft() {
@@ -2964,6 +3008,35 @@ function App() {
           >
             画像を追加
           </button>
+          {selectedHintWords.length ? (
+            <section className="word-hint-summary" aria-label="思い出すヒント">
+              <div>
+                <span>思い出すヒント</span>
+                <button type="button" onClick={openWordHints} disabled={composerDisabled}>
+                  言葉を選び直す
+                </button>
+              </div>
+              <ul>
+                {selectedHintWords.map((word) => (
+                  <li key={word}>
+                    {word}
+                    <button type="button" onClick={() => toggleHintWord(word)} disabled={composerDisabled} aria-label={`${word}を解除`}>
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : (
+            <button
+              className="word-hint-entry"
+              type="button"
+              onClick={openWordHints}
+              disabled={composerDisabled}
+            >
+              言葉が浮かばないとき
+            </button>
+          )}
           <textarea
             ref={composerTextareaRef}
             aria-label="メモ"
@@ -2978,6 +3051,58 @@ function App() {
             {isSaving ? "保存中" : "保存"}
           </button>
         </form>
+        {wordHintScreen ? (
+          <div className="word-hint-backdrop" role="presentation">
+            <section className="word-hint-dialog" role="dialog" aria-modal="true" aria-labelledby="word-hint-title">
+              <header className="word-hint-dialog-header">
+                <div>
+                  <p>言葉が浮かばないとき</p>
+                  <h2 id="word-hint-title">
+                    {wordHintScreen === "prompts" ? "今日の練習を思い出すきっかけを選んでください。" : wordHintScreen === "activities" ? "どの活動について思い出しますか？" : "気になった言葉を選んでください。"}
+                  </h2>
+                </div>
+                <button type="button" onClick={closeWordHints}>記録へ戻る</button>
+              </header>
+              {wordHintScreen === "prompts" ? (
+                <div className="word-hint-choice-grid" aria-label="思い出すきっかけ">
+                  {wordHintPrompts.map((prompt) => <button type="button" key={prompt} onClick={() => chooseWordHintPrompt(prompt)}>{prompt}</button>)}
+                </div>
+              ) : null}
+              {wordHintScreen === "activities" ? (
+                <>
+                  <p className="word-hint-current">きっかけ：{wordHintPrompt}</p>
+                  <div className="word-hint-choice-grid word-hint-activity-grid" aria-label="活動を選択">
+                    {wordHintActivities.map((activity) => <button type="button" key={activity} onClick={() => chooseWordHintActivity(activity)}>{activity}</button>)}
+                  </div>
+                  <button className="word-hint-back-button" type="button" onClick={() => setWordHintScreen("prompts")}>戻る</button>
+                </>
+              ) : null}
+              {wordHintScreen === "words" && wordHintActivity ? (
+                <>
+                  <p className="word-hint-current">きっかけ：{wordHintPrompt}　活動：{wordHintActivity}</p>
+                  <p className="word-hint-selected-count" role="status">選んだ言葉：{selectedHintWords.length}個</p>
+                  <div className="word-hint-groups">
+                    {wordHintDictionary[wordHintActivity].map((group) => (
+                      <details key={group.label}>
+                        <summary>{group.label}</summary>
+                        <div className="word-hint-words">
+                          {group.words.map((word) => {
+                            const selected = selectedHintWords.includes(word);
+                            return <button type="button" key={word} className={selected ? "selected" : ""} onClick={() => toggleHintWord(word)} aria-pressed={selected}>{selected ? "✓ " : ""}{word}</button>;
+                          })}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                  <div className="word-hint-actions">
+                    <button className="word-hint-back-button" type="button" onClick={() => setWordHintScreen("activities")}>戻る</button>
+                    <button className="word-hint-use-button" type="button" onClick={closeWordHints}>この言葉を見ながら書く</button>
+                  </div>
+                </>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
           </>
         )}
       </main>

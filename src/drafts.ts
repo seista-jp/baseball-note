@@ -1,12 +1,14 @@
 import type { BaseballDatabase } from "./db";
 import { getDataWriteErrorMessage } from "./dataError";
 import type { LogEntry, LogImage, LogTag } from "./types";
+import { emptyWordHints, wordHintActivities, wordHintPrompts, type WordHintState } from "./wordHints";
 
 export type DraftContent = {
   date: string;
   text: string;
   tags: LogTag[];
   images: LogImage[];
+  wordHints: WordHintState;
 };
 
 // Completed rows contain no draft text or image. Their revision prevents a stale
@@ -32,10 +34,36 @@ export type DraftSnapshot = {
 };
 
 export const hasDraftContent = (content: DraftContent): boolean =>
-  Boolean(content.text || content.tags.length || content.images.length);
+  Boolean(content.text || content.tags.length || content.images.length || content.wordHints.words.length);
 
 export function emptyDraft(date: string): DraftContent {
-  return { date, text: "", tags: [], images: [] };
+  return { date, text: "", tags: [], images: [], wordHints: emptyWordHints() };
+}
+
+// randomUUID is restricted to secure contexts. The Wi-Fi development preview
+// uses HTTP, so keep draft protection available there as well.
+export function createDraftId(randomUUID: (() => string) | null = crypto.randomUUID?.bind(crypto) ?? null): string {
+  if (randomUUID) return randomUUID();
+
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+}
+
+function normalizeDraftContent(content: DraftContent): DraftContent {
+  return {
+    ...content,
+    wordHints: Array.isArray(content.wordHints?.words)
+      ? {
+        words: [...new Set(content.wordHints.words.filter((word) => typeof word === "string"))],
+        ...(wordHintPrompts.includes(content.wordHints.prompt as typeof wordHintPrompts[number]) ? { prompt: content.wordHints.prompt } : {}),
+        ...(wordHintActivities.includes(content.wordHints.activity as typeof wordHintActivities[number]) ? { activity: content.wordHints.activity } : {}),
+      }
+      : emptyWordHints(),
+  };
 }
 
 class DraftConflict extends Error {}
@@ -98,8 +126,9 @@ export class ComposerDraft {
           const row = rows[0];
           if (row?.content) {
             this.token = { id: row.id, revision: row.revision };
-            this.persistedContent = row.content;
-            this.publish({ content: row.content, notice: "書きかけを復元しました。" });
+            const content = normalizeDraftContent(row.content);
+            this.persistedContent = content;
+            this.publish({ content, notice: "書きかけを復元しました。" });
           }
           this.publish({ ready: true, error: "", alternatives: rows.slice(row ? 1 : 0) });
         } catch {
@@ -118,7 +147,7 @@ export class ComposerDraft {
       const row = token ? await this.database.composerDrafts.get(token.id) : undefined;
       const conflict = Boolean(token && (!row || row.revision !== token.revision || row.state !== "active"));
       // A conflict gets its own identity; never overwrite another tab's content.
-      const id = !token || conflict ? crypto.randomUUID() : token.id;
+      const id = !token || conflict ? createDraftId() : token.id;
       const revision = !token || conflict ? 1 : token.revision + 1;
       await this.database.composerDrafts.put({
         id, revision, updatedAt: new Date().toISOString(), state: "active", content,
@@ -163,9 +192,10 @@ export class ComposerDraft {
           throw new Error("書きかけは別のタブで保存・破棄されています。入力は切り替えていません。");
         }
         this.token = { id: row.id, revision: row.revision };
-        this.persistedContent = row.content;
+        const content = normalizeDraftContent(row.content);
+        this.persistedContent = content;
         this.sequence += 1;
-        this.publish({ content: row.content, error: "", notice: "書きかけを復元しました。" });
+        this.publish({ content, error: "", notice: "書きかけを復元しました。" });
       } catch (error) {
         this.publish({ error: error instanceof Error ? error.message : "書きかけを開けませんでした。現在の入力は残っています。" });
       } finally {
