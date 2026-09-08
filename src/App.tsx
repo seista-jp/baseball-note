@@ -20,6 +20,8 @@ import {
   Upload,
   BookOpen,
   Home,
+  Mic,
+  Square,
   MoreHorizontal,
   Plus,
 } from "lucide-react";
@@ -30,8 +32,10 @@ import {
   type BackupLogEntry,
 } from "./backup";
 import { getDataWriteErrorMessage } from "./dataError";
-import { db } from "./db";
+import { db, type BaseballDatabase } from "./db";
 import { ComposerDraft, hasDraftContent } from "./drafts";
+import { applyRecognitionEvent, RecognitionTranscriptState, type UnconfirmedRecognitionResult } from "./recognition-result-merge";
+import { createVoiceDiagnosticId, presentVoiceDiagnostic, type VoiceDiagnostic, type VoiceDiagnosticStore, type VoiceRecognitionNotification } from "./voiceDiagnostics";
 import {
   formatDateHeading,
   formatDisplayDate,
@@ -64,6 +68,9 @@ const lastBackupAtStorageKey = "baseball-note-last-backup-at";
 const onboardingCompletedStorageKey = "baseball-note-onboarding-completed";
 const reviewRangeStorageKey = "baseball-note-record-review-range";
 const chosenFocusStorageKey = "baseball-note-chosen-focus";
+const voiceConsentStorageKey = "baseball-note-voice-input-consent";
+const voiceConsentVersion = "2026-09-08";
+const voiceInputLimitMs = 3 * 60 * 1000;
 export const focusReflectionNoticeText = "記録画面の『今、一番意識していること』に反映しました";
 const reviewTagFilters = ["すべて", ...logTags, "その他"] as const;
 const primaryFocusMarker = "【今、一番意識していること】";
@@ -817,7 +824,27 @@ function BackupDialog({ mode, summary, lastBackupAt, onConfirm, onCancel }: Back
   );
 }
 
-function App() {
+type AppProps = { database?: BaseballDatabase; enableVoiceInput?: boolean; developmentVoiceInput?: boolean; voiceDiagnostics?: VoiceDiagnosticStore };
+type VoiceRecognition = {
+  lang: string; continuous: boolean; interimResults: boolean; start(): void; stop(): void; abort(): void;
+  onstart: (() => void) | null; onend: (() => void) | null; onerror: ((event: { error: string }) => void) | null;
+  onspeechstart: (() => void) | null; onspeechend: (() => void) | null;
+  onresult: ((event: Event & { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
+};
+type VoiceRecognitionConstructor = new () => VoiceRecognition;
+type VoicePhase = "idle" | "consent" | "starting" | "listening" | "ending" | "failed" | "unavailable" | "timed-out";
+
+function getVoiceRecognitionConstructor(): VoiceRecognitionConstructor | null {
+  const recognitionWindow = window as typeof window & { SpeechRecognition?: VoiceRecognitionConstructor; webkitSpeechRecognition?: VoiceRecognitionConstructor };
+  return recognitionWindow.SpeechRecognition ?? recognitionWindow.webkitSpeechRecognition ?? null;
+}
+
+function readVoiceConsent(): boolean {
+  try { return JSON.parse(window.localStorage.getItem(voiceConsentStorageKey) ?? "{}").version === voiceConsentVersion; }
+  catch { return false; }
+}
+
+function App({ database = db, enableVoiceInput = false, developmentVoiceInput = false, voiceDiagnostics }: AppProps) {
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [searchLogs, setSearchLogs] = useState<LogEntry[]>([]);
@@ -837,7 +864,7 @@ function App() {
   const [aiAnalysisNotice, setAiAnalysisNotice] = useState("");
   const [focusReflectionNotice, setFocusReflectionNotice] = useState("");
   const [isRangePickerOpen, setIsRangePickerOpen] = useState(false);
-  const [draft] = useState(() => new ComposerDraft(db, todayKey));
+  const [draft] = useState(() => new ComposerDraft(database, todayKey));
   const draftState = useSyncExternalStore(draft.subscribe, draft.getSnapshot);
   const text = draftState.content.text;
   const selectedTags = draftState.content.tags;
@@ -850,9 +877,27 @@ function App() {
   const draftStarted = useRef(false);
   const selectedDateRef = useRef(selectedDate);
   selectedDateRef.current = selectedDate;
+  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
+  const [voiceMessage, setVoiceMessage] = useState("");
+  const [isVoiceConsentOpen, setIsVoiceConsentOpen] = useState(false);
+  const [latestVoiceDiagnostic, setLatestVoiceDiagnostic] = useState<VoiceDiagnostic | null>(null);
+  const [interruptedVoiceDiagnostic, setInterruptedVoiceDiagnostic] = useState<VoiceDiagnostic | null>(null);
+  const [previousVoiceDiagnostic, setPreviousVoiceDiagnostic] = useState<VoiceDiagnostic | null>(null);
+  const [voiceDiagnosticsReady, setVoiceDiagnosticsReady] = useState(() => !voiceDiagnostics);
+  const voiceControlRef = useRef({
+    active: false, stopping: false, completed: false, id: 0, recognitionRun: 0, startedAt: 0,
+    diagnosticId: "", diagnosticStartedAt: "",
+    baseText: "", draftDate: todayKey, transcript: new RecognitionTranscriptState(), events: [] as string[],
+    utteranceNumber: 1, nextSpeechStartsNewUtterance: false, recognitionNotifications: [] as VoiceRecognitionNotification[],
+    recognizer: null as VoiceRecognition | null, timerId: undefined as number | undefined,
+    restartId: undefined as number | undefined, stopFallbackId: undefined as number | undefined,
+    receivedFinalAfterStop: false,
+  });
   const hasNewDraft = hasDraftContent(draftState.content);
   const draftDate = hasNewDraft ? draftState.content.date : selectedDate;
-  const composerDisabled = !draftState.ready || draftState.busy || isDiscardConfirmOpen;
+  const voiceIsActive = voicePhase === "starting" || voicePhase === "listening" || voicePhase === "ending";
+  const composerDisabled = !draftState.ready || draftState.busy || isDiscardConfirmOpen || voiceIsActive;
+  const voiceDiagnosticPresentation = presentVoiceDiagnostic(latestVoiceDiagnostic, interruptedVoiceDiagnostic, previousVoiceDiagnostic);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilterTags, setSelectedFilterTags] = useState<LogTag[]>([]);
   const [pendingImageUrl, setPendingImageUrl] = useState("");
@@ -1014,8 +1059,236 @@ function App() {
     };
   }, [draft]);
 
+  useEffect(() => {
+    if (!voiceDiagnostics) { setVoiceDiagnosticsReady(true); return; }
+    let active = true;
+    setVoiceDiagnosticsReady(false);
+    void (async () => {
+      const interrupted = await voiceDiagnostics.recoverPending();
+      const previous = interrupted ? undefined : await voiceDiagnostics.latest();
+      if (!active) return;
+      if (interrupted) setInterruptedVoiceDiagnostic(interrupted);
+      else if (previous) setPreviousVoiceDiagnostic(previous);
+      setVoiceDiagnosticsReady(true);
+    })().catch(() => {
+      if (active) {
+        setVoiceMessage("開発用診断を復元できませんでした。本文の下書きは別に保護されています。");
+        setVoiceDiagnosticsReady(true);
+      }
+    });
+    return () => { active = false; };
+  }, [voiceDiagnostics]);
+
+  useEffect(() => () => {
+    stopVoiceInput("画面を閉じるか再読み込みしたため終了しました");
+  }, []);
+
   function updateNewDraft(patch: Parameters<ComposerDraft["update"]>[0]) {
     draft.update({ date: draftDate, ...patch });
+  }
+
+  function addVoiceEvent(message: string): void {
+    const control = voiceControlRef.current;
+    const elapsed = Math.max(0, Date.now() - control.startedAt);
+    const seconds = Math.floor(elapsed / 1000);
+    control.events.push(`${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}.${String(elapsed % 1000).padStart(3, "0")} 音声入力: ${message}`);
+  }
+
+  function persistVoiceText(): string {
+    const control = voiceControlRef.current;
+    const appended = control.transcript.text();
+    draft.update({ date: control.draftDate, text: `${control.baseText}${appended}` });
+    return appended;
+  }
+
+  function buildVoiceDiagnostic(status: VoiceDiagnostic["status"], endReason: string): VoiceDiagnostic {
+    const control = voiceControlRef.current;
+    return {
+      id: control.diagnosticId || createVoiceDiagnosticId(),
+      createdAt: control.diagnosticStartedAt || new Date().toISOString(),
+      startedAt: control.diagnosticStartedAt || undefined,
+      savedAt: new Date().toISOString(),
+      language: "ja-JP", maxDurationMs: voiceInputLimitMs, status, endReason,
+      resultText: control.transcript.text(), unconfirmedResults: control.transcript.unconfirmedResults(),
+      events: [...control.events], recognitionNotifications: [...control.recognitionNotifications],
+    };
+  }
+
+  function saveVoiceDiagnosticProgress(detail: string): void {
+    const control = voiceControlRef.current;
+    if (!voiceDiagnostics || !control.active) return;
+    void voiceDiagnostics.savePending(buildVoiceDiagnostic("in-progress", detail)).catch(() => {
+      setVoiceMessage("開発用診断の途中保存に失敗しました。本文の下書きは別に保護されています。");
+    });
+  }
+
+  function beginNextVoiceUtterance(reason: string): void {
+    const control = voiceControlRef.current;
+    if (!control.transcript.hasResultsInUtterance(control.utteranceNumber)) return;
+    control.utteranceNumber += 1;
+    addVoiceEvent(`発話 #${control.utteranceNumber} を開始します — ${reason}`);
+  }
+
+  function clearVoiceTimers(): void {
+    const control = voiceControlRef.current;
+    if (control.timerId !== undefined) window.clearInterval(control.timerId);
+    if (control.restartId !== undefined) window.clearTimeout(control.restartId);
+    if (control.stopFallbackId !== undefined) window.clearTimeout(control.stopFallbackId);
+    control.timerId = undefined; control.restartId = undefined; control.stopFallbackId = undefined;
+  }
+
+  function completeVoiceInput(status: VoiceDiagnostic["status"], endReason: string, message: string): void {
+    const control = voiceControlRef.current;
+    if (control.completed) return;
+    control.completed = true; control.active = false; clearVoiceTimers();
+    persistVoiceText();
+    addVoiceEvent(`${endReason}。${control.receivedFinalAfterStop ? "停止後の確定結果を受け取りました。" : ""}`);
+    const diagnostic = buildVoiceDiagnostic(status, endReason);
+    setLatestVoiceDiagnostic(diagnostic);
+    setInterruptedVoiceDiagnostic(null); setPreviousVoiceDiagnostic(null);
+    if (voiceDiagnostics) void voiceDiagnostics.complete(diagnostic).catch(() => setVoiceMessage("診断を保存できませんでした。本文の下書きは残っています。"));
+    setVoicePhase(status === "timed-out" ? "timed-out" : status === "unavailable" ? "unavailable" : status === "failed" ? "failed" : "idle");
+    setVoiceMessage(message);
+    control.recognizer = null;
+  }
+
+  function stopVoiceInput(reason = "本人が話し終わりを押しました", timedOut = false): void {
+    const control = voiceControlRef.current;
+    if (!control.active || control.stopping) return;
+    control.stopping = true; if (control.restartId !== undefined) window.clearTimeout(control.restartId);
+    const retained = control.transcript.freezeInterimResults();
+    persistVoiceText();
+    addVoiceEvent(`${reason}。途中結果を${retained.length}件、未確定として保持しました。`);
+    saveVoiceDiagnosticProgress(`${reason}。停止後の確定結果を待っています。`);
+    setVoicePhase(timedOut ? "timed-out" : "ending");
+    setVoiceMessage(timedOut ? "3分になったため終了しています。取得済みの文字は残します。" : "終了しています。停止後の確定結果を少し待ちます。");
+    try { control.recognizer?.stop(); } catch { /* すでに終了していても保持済み文字を優先する。 */ }
+    control.stopFallbackId = window.setTimeout(() => {
+      completeVoiceInput(timedOut ? "timed-out" : "ended", `${reason}後、最終結果の待機時間が終了しました`, timedOut ? "3分で終了しました。取得済みの文字は本文に残しています。" : "音声入力を終了しました。本文は手で修正できます。");
+    }, 1500);
+  }
+
+  function beginRecognitionRun(sessionId: number): void {
+    const control = voiceControlRef.current;
+    const Recognition = getVoiceRecognitionConstructor();
+    if (!control.active || control.id !== sessionId || control.stopping || !Recognition) return;
+    const recognizer = new Recognition();
+    control.recognizer = recognizer; control.recognitionRun += 1;
+    const run = control.recognitionRun;
+    recognizer.lang = "ja-JP"; recognizer.continuous = true; recognizer.interimResults = true;
+    recognizer.onstart = () => {
+      if (!control.active || control.id !== sessionId || control.stopping || control.recognizer !== recognizer) return;
+      setVoicePhase("listening"); setVoiceMessage("話してください。本文の末尾へ認識中の文字を追加しています。"); addVoiceEvent(`認識 #${run} を開始しました。`);
+      saveVoiceDiagnosticProgress("認識開始通知を受けました。");
+    };
+    recognizer.onspeechstart = () => {
+      if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      if (control.nextSpeechStartsNewUtterance) beginNextVoiceUtterance("前の発話の終了後に、新しい発話開始通知を受けました。");
+      control.nextSpeechStartsNewUtterance = false;
+      addVoiceEvent(`認識 #${run}・発話 #${control.utteranceNumber} の開始通知を受けました。`);
+      saveVoiceDiagnosticProgress("発話開始通知を受けました。");
+    };
+    recognizer.onspeechend = () => {
+      if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      control.nextSpeechStartsNewUtterance = true;
+      addVoiceEvent(`認識 #${run}・発話 #${control.utteranceNumber} の終了通知を受けました。`);
+      saveVoiceDiagnosticProgress("発話終了通知を受けました。");
+    };
+    recognizer.onresult = (event) => {
+      if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      const eventResultIndex = event.resultIndex;
+      const updates = applyRecognitionEvent(control.transcript, { recognitionSession: run, utteranceNumber: control.utteranceNumber, resultIndex: eventResultIndex }, Array.from(event.results, (result) => ({ isFinal: result.isFinal, text: result[0]?.transcript ?? "" })));
+      const appendedVoiceText = persistVoiceText();
+      for (const update of updates) {
+        const { resultIndex: index, text, isFinal, outcome } = update;
+        if (isFinal && control.stopping && (outcome === "new-final" || outcome === "corrected-final")) control.receivedFinalAfterStop = true;
+        control.recognitionNotifications.push({
+          recognitionSession: run, utteranceNumber: control.utteranceNumber, eventResultIndex, resultIndex: index,
+          isFinal, text, mergeOutcome: outcome, mergedText: control.transcript.text(), appendedVoiceText,
+        });
+        if (outcome === "new-final") addVoiceEvent(`生の認識通知: 認識 #${run}・発話 #${control.utteranceNumber}・resultIndex=${eventResultIndex}・結果 #${index}・確定 — ${text || "（空）"}`);
+        else if (outcome === "corrected-final") addVoiceEvent(`生の認識通知: 認識 #${run}・発話 #${control.utteranceNumber}・resultIndex=${eventResultIndex}・結果 #${index}・確定の訂正 — ${text || "（空）"}`);
+        else if (outcome === "interim") addVoiceEvent(`生の認識通知: 認識 #${run}・発話 #${control.utteranceNumber}・resultIndex=${eventResultIndex}・途中結果 #${index} — ${text}`);
+        else addVoiceEvent(`生の認識通知: 認識 #${run}・発話 #${control.utteranceNumber}・resultIndex=${eventResultIndex}・結果 #${index} は統合結果へ反映しませんでした（${outcome}）。`);
+      }
+      addVoiceEvent(`統合後の文字: ${control.transcript.text()} / 本文へ反映した音声部分: ${appendedVoiceText}`);
+      saveVoiceDiagnosticProgress("認識結果を統合し、本文へ反映しました。");
+    };
+    recognizer.onerror = (event) => {
+      if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      if (control.stopping && event.error === "aborted") { addVoiceEvent("アプリが終了のため要求した中止通知を受けました。"); return; }
+      addVoiceEvent(`認識エラーを受けました — ${event.error}`);
+      saveVoiceDiagnosticProgress(`認識エラーを受けました — ${event.error}`);
+      if (event.error === "no-speech") return;
+      control.stopping = true; control.transcript.freezeInterimResults(); persistVoiceText();
+      try { recognizer.abort(); } catch { /* 終了済みの認識器では何もしない。 */ }
+      completeVoiceInput("failed", `認識エラー: ${event.error}`, `音声入力を続けられませんでした（${event.error}）。取得済みの文字は残し、手入力へ戻れます。`);
+    };
+    recognizer.onend = () => {
+      if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      addVoiceEvent(`認識 #${run} の終了通知を受けました。`);
+      saveVoiceDiagnosticProgress("認識終了通知を受けました。");
+      if (control.stopping) {
+        setVoiceMessage("認識終了通知を受けました。停止後の確定結果を待っています。");
+        return;
+      }
+      if (Date.now() - control.startedAt >= voiceInputLimitMs) { stopVoiceInput("3分の上限に達しました", true); return; }
+      setVoicePhase("starting"); setVoiceMessage("認識が終了したため、入力中のまま再開を試みます。");
+      control.restartId = window.setTimeout(() => {
+        if (!control.active || control.stopping || control.id !== sessionId) return;
+        addVoiceEvent("認識終了後の再開を要求します。"); saveVoiceDiagnosticProgress("認識終了後の再開を要求します。"); beginRecognitionRun(sessionId);
+      }, 200);
+    };
+    try { recognizer.start(); addVoiceEvent(`${run === 1 ? "最初の" : "再開の"}認識開始を要求しました。`); saveVoiceDiagnosticProgress("認識開始を要求しました。"); }
+    catch (error) {
+      const name = error instanceof Error ? error.name : "RecognitionStartError";
+      addVoiceEvent(`認識開始に失敗しました — ${name}`); control.stopping = true; completeVoiceInput("failed", `認識開始失敗: ${name}`, "音声入力を開始できませんでした。本文は変更していません。");
+    }
+  }
+
+  function startVoiceInput(): void {
+    const Recognition = getVoiceRecognitionConstructor();
+    if (!window.isSecureContext || !Recognition) {
+      const reason = !window.isSecureContext ? "安全な接続（HTTPS）が必要です" : "このブラウザは音声入力に対応していません";
+      setVoicePhase("unavailable"); setVoiceMessage(`${reason}。手入力はそのまま使えます。`); return;
+    }
+    if (!draftState.ready || draftState.busy || voiceControlRef.current.active) return;
+    const control = voiceControlRef.current;
+    control.active = true; control.stopping = false; control.completed = false; control.id += 1; control.recognitionRun = 0; control.startedAt = Date.now();
+    control.diagnosticId = createVoiceDiagnosticId(); control.diagnosticStartedAt = new Date(control.startedAt).toISOString();
+    control.baseText = draft.getSnapshot().content.text; control.draftDate = draftDate; control.transcript = new RecognitionTranscriptState(); control.events = [];
+    control.utteranceNumber = 1; control.nextSpeechStartsNewUtterance = false; control.recognitionNotifications = []; control.receivedFinalAfterStop = false;
+    setLatestVoiceDiagnostic(null); setInterruptedVoiceDiagnostic(null); setPreviousVoiceDiagnostic(null);
+    setVoicePhase("starting"); setVoiceMessage("音声入力を開始しています…"); addVoiceEvent("開始しました。既存本文の末尾へ、今回の認識文字だけを追加します。");
+    saveVoiceDiagnosticProgress("音声入力を開始しました。");
+    control.timerId = window.setInterval(() => {
+      if (!control.active || control.stopping) return;
+      const elapsed = Date.now() - control.startedAt;
+      if (elapsed >= voiceInputLimitMs) stopVoiceInput("3分の上限に達しました", true);
+      else if (voiceInputLimitMs - elapsed <= 30_000) setVoiceMessage(`残り${Math.ceil((voiceInputLimitMs - elapsed) / 1000)}秒です。話し終わりを押して終了できます。`);
+    }, 250);
+    beginRecognitionRun(control.id);
+  }
+
+  function requestVoiceInput(): void {
+    if (voiceDiagnostics && !voiceDiagnosticsReady) {
+      setVoiceMessage("開発用診断を確認しています。少し待ってから音声入力を押してください。");
+      return;
+    }
+    if (!readVoiceConsent()) { setVoicePhase("consent"); setIsVoiceConsentOpen(true); return; }
+    startVoiceInput();
+  }
+
+  function acceptVoiceConsent(): void {
+    try { window.localStorage.setItem(voiceConsentStorageKey, JSON.stringify({ version: voiceConsentVersion, acceptedAt: new Date().toISOString() })); }
+    catch { setVoiceMessage("同意の記憶に失敗したため、今回は音声入力を開始しません。手入力は使えます。"); setIsVoiceConsentOpen(false); return; }
+    setIsVoiceConsentOpen(false); startVoiceInput();
+  }
+
+  function copyVoiceDiagnostic(diagnostic: VoiceDiagnostic, title: string): void {
+    const rawNotifications = diagnostic.recognitionNotifications ?? [];
+    const text = ["Baseball Note 通常記録画面 音声入力の開発診断", `区分: ${title}`, `対象の開始日時: ${diagnostic.startedAt ?? diagnostic.createdAt}`, `診断の最終保存日時: ${diagnostic.savedAt ?? "不明（この版より前の診断）"}`, "入力条件: Web Speech API、ja-JP、continuous=true、interimResults=true", `上限: ${voiceInputLimitMs / 60_000}分`, `状態: ${diagnostic.status}`, `終了理由: ${diagnostic.endReason}`, `結果: ${diagnostic.resultText || "（なし）"}`, `未確定の文字: ${diagnostic.unconfirmedResults.length ? "あり" : "なし"}`, "生の認識通知と統合結果:", ...(rawNotifications.length ? rawNotifications.map((notification) => `認識 #${notification.recognitionSession}・発話 #${notification.utteranceNumber}・event.resultIndex=${notification.eventResultIndex}・結果 #${notification.resultIndex}・${notification.isFinal ? "確定" : "途中"} — 受信文字: ${notification.text || "（空）"} / 統合処理: ${notification.mergeOutcome} / 統合後: ${notification.mergedText} / 本文へ反映した音声部分: ${notification.appendedVoiceText}`) : ["（この版より前の診断のため、受信文字列はありません）"]), "通知:", ...diagnostic.events, `ブラウザ情報: ${navigator.userAgent}`].join("\n");
+    void navigator.clipboard.writeText(text).then(() => setVoiceMessage(`${title}をコピーしました。`), () => setVoiceMessage("診断をコピーできませんでした。"));
   }
 
   function closeWordHints() {
@@ -1117,7 +1390,7 @@ function App() {
   }, [editingLogId]);
 
   useEffect(() => {
-    if (!hasUnsavedEdit && !hasUnsavedAiAnalysisDraft && !draftState.pending && !draftState.error && !isPreparingImage && !isSaving) {
+    if (!hasUnsavedEdit && !hasUnsavedAiAnalysisDraft && !draftState.pending && !draftState.error && !isPreparingImage && !isSaving && !voiceIsActive) {
       return;
     }
 
@@ -1128,7 +1401,13 @@ function App() {
 
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit, draftState.pending, draftState.error, isPreparingImage, isSaving]);
+  }, [hasUnsavedAiAnalysisDraft, hasUnsavedEdit, draftState.pending, draftState.error, isPreparingImage, isSaving, voiceIsActive]);
+
+  useEffect(() => {
+    const stopForPageHide = () => stopVoiceInput("画面を中断したため終了しました");
+    window.addEventListener("pagehide", stopForPageHide);
+    return () => window.removeEventListener("pagehide", stopForPageHide);
+  }, []);
 
   useEffect(() => {
     if (!composerGuideStep) {
@@ -1215,6 +1494,7 @@ function App() {
   }
 
   function openSafetyFromOnboarding(mode: Exclude<OnboardingMode, null>) {
+    stopVoiceInput("画面を移動したため終了しました");
     setInformationReturnOnboardingMode(mode);
     setOnboardingMode(null);
     updateInformationPage("safety");
@@ -1251,6 +1531,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("画面を移動したため終了しました");
     setInformationReturnOnboardingMode(null);
     updateInformationPage("safety");
     closeMenu();
@@ -1285,6 +1566,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("画面を移動したため終了しました");
     setInformationReturnOnboardingMode(null);
     updateInformationPage(null);
     setSelectedDate(todayKey);
@@ -1296,6 +1578,7 @@ function App() {
   }
 
   function showLogView() {
+    stopVoiceInput("画面を移動したため終了しました");
     setViewMode("logs");
     setSearchQuery("");
   }
@@ -1306,6 +1589,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("画面を移動したため終了しました");
     setViewMode("search");
     setSearchQuery("");
     closeMenu();
@@ -1313,6 +1597,7 @@ function App() {
 
   function showRecordReview() {
     if (!prepareToLeaveEditing() || !prepareToLeaveAiAnalysisDraft()) return;
+    stopVoiceInput("画面を移動したため終了しました");
     setViewMode("review");
     setReviewCopyStatus(null);
     closeMenu();
@@ -1324,6 +1609,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("画面を移動したため終了しました");
     setViewMode("ai-analysis");
     setAiAnalysisScreen("list");
     setSelectedAiAnalysis(null);
@@ -1371,6 +1657,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("画面を移動したため終了しました");
     setReviewLogs([]);
     setReviewLoadError("");
     setIsReviewLoading(true);
@@ -1397,6 +1684,7 @@ function App() {
       return;
     }
 
+    stopVoiceInput("日付を移動したため終了しました");
     setSelectedDate((currentDate) => offsetDateKey(currentDate, offsetDays));
   }
 
@@ -1408,7 +1696,7 @@ function App() {
       setLogLoadError("");
 
       try {
-        const entries = await db.logs
+        const entries = await database.logs
           .where("date")
           .equals(selectedDate)
           .sortBy("createdAt");
@@ -1451,7 +1739,7 @@ function App() {
       setSearchLoadError("");
 
       try {
-        const entries = await db.logs.orderBy("createdAt").toArray();
+        const entries = await database.logs.orderBy("createdAt").toArray();
 
         if (isActive) {
           setSearchLogs(entries.map(normalizeLog).reverse());
@@ -1492,8 +1780,8 @@ function App() {
 
       try {
         const entries = reviewRange
-          ? await db.logs.where("date").between(reviewRange.start, reviewRange.end, true, true).toArray()
-          : await db.logs.orderBy("createdAt").reverse().toArray();
+          ? await database.logs.where("date").between(reviewRange.start, reviewRange.end, true, true).toArray()
+          : await database.logs.orderBy("createdAt").reverse().toArray();
 
         if (isActive) {
           setReviewLogs(reviewRange ? sortLogsByDate(entries) : entries.map(normalizeLog));
@@ -1528,7 +1816,7 @@ function App() {
       }
 
       try {
-        const entries = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
+        const entries = await database.aiAnalyses.orderBy("createdAt").reverse().toArray();
 
         if (isActive) {
           setAiAnalyses(entries);
@@ -1603,7 +1891,7 @@ function App() {
     if (!draft.getSnapshot().error) {
       // A date switch during a slow save must not insert the entry into another day.
       const displayedDate = selectedDateRef.current;
-      const entries = await db.logs.where("date").equals(displayedDate).sortBy("createdAt").catch(() => null);
+      const entries = await database.logs.where("date").equals(displayedDate).sortBy("createdAt").catch(() => null);
       if (entries && selectedDateRef.current === displayedDate) setLogs(entries.map(normalizeLog));
       else if (!entries) setSubmitMessage("記録は保存できました。表示を更新するには日付を開き直してください。");
     }
@@ -1664,7 +1952,7 @@ function App() {
     setReviewCopyStatus(null);
 
     try {
-      const allEntries = await db.logs.orderBy("createdAt").toArray();
+      const allEntries = await database.logs.orderBy("createdAt").toArray();
       const longTermEntries = sortLogsByDate(allEntries);
 
       await copyTextToClipboard(
@@ -1720,7 +2008,7 @@ function App() {
     setAiAnalysisFormMessage("");
 
     try {
-      await db.aiAnalyses.add(analysis);
+      await database.aiAnalyses.add(analysis);
       setAiAnalyses((currentAnalyses) =>
         sortAiAnalysesNewest([...currentAnalyses, analysis]),
       );
@@ -1815,7 +2103,7 @@ function App() {
     setEditingMessage("");
 
     try {
-      await db.logs.put(updatedLog);
+      await database.logs.put(updatedLog);
       setLogs((currentLogs) =>
         currentLogs.map((currentLog) => (currentLog.id === log.id ? updatedLog : currentLog)),
       );
@@ -1842,7 +2130,7 @@ function App() {
     setOperationError("");
 
     try {
-      await db.logs.delete(logId);
+      await database.logs.delete(logId);
       setLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
       setSearchLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
       setReviewLogs((currentLogs) => currentLogs.filter((log) => log.id !== logId));
@@ -1881,8 +2169,8 @@ function App() {
 
     try {
       const [logCount, aiAnalysisCount] = await Promise.all([
-        db.logs.count(),
-        db.aiAnalyses.count(),
+        database.logs.count(),
+        database.aiAnalyses.count(),
       ]);
       setBackupSummary({ logCount, aiAnalysisCount });
     } catch {
@@ -1914,8 +2202,8 @@ function App() {
     let url = "";
 
     try {
-      const allLogs = await db.logs.orderBy("createdAt").toArray();
-      const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").toArray();
+      const allLogs = await database.logs.orderBy("createdAt").toArray();
+      const allAiAnalyses = await database.aiAnalyses.orderBy("createdAt").toArray();
       const backupLogs: BackupLogEntry[] = await Promise.all(
         allLogs.map(async (log) => {
           const normalizedLog = normalizeLog(log);
@@ -1986,8 +2274,8 @@ function App() {
       setBackupMessage("バックアップを確認しています。");
       const parsed: unknown = JSON.parse(await file.text());
       const { logs: backupLogs, aiAnalyses: backupAiAnalyses } = validateBackup(parsed);
-      const existingLogs = await db.logs.bulkGet(backupLogs.map((log) => log.id));
-      const existingAiAnalyses = await db.aiAnalyses.bulkGet(
+      const existingLogs = await database.logs.bulkGet(backupLogs.map((log) => log.id));
+      const existingAiAnalyses = await database.aiAnalyses.bulkGet(
         backupAiAnalyses.map((analysis) => analysis.id),
       );
       const logOverwriteCount = existingLogs.filter((log) => log !== undefined).length;
@@ -2035,29 +2323,29 @@ function App() {
         })),
       );
 
-      await db.transaction("rw", db.logs, db.aiAnalyses, async () => {
+      await database.transaction("rw", database.logs, database.aiAnalyses, async () => {
         if (restoredLogs.length > 0) {
-          await db.logs.bulkPut(restoredLogs);
+          await database.logs.bulkPut(restoredLogs);
         }
         if (backupAiAnalyses.length > 0) {
-          await db.aiAnalyses.bulkPut(backupAiAnalyses);
+          await database.aiAnalyses.bulkPut(backupAiAnalyses);
         }
       });
       importWasApplied = true;
-      const entries = await db.logs.where("date").equals(selectedDate).sortBy("createdAt");
+      const entries = await database.logs.where("date").equals(selectedDate).sortBy("createdAt");
       setLogs(entries.map(normalizeLog));
       if (isSearchView) {
-        const allEntries = await db.logs.orderBy("createdAt").toArray();
+        const allEntries = await database.logs.orderBy("createdAt").toArray();
         setSearchLogs(allEntries.map(normalizeLog).reverse());
       }
       if (isReviewView && reviewRange) {
-        const reviewEntries = await db.logs
+        const reviewEntries = await database.logs
           .where("date")
           .between(reviewRange.start, reviewRange.end, true, true)
           .toArray();
         setReviewLogs(sortLogsByDate(reviewEntries));
       }
-      const allAiAnalyses = await db.aiAnalyses.orderBy("createdAt").reverse().toArray();
+      const allAiAnalyses = await database.aiAnalyses.orderBy("createdAt").reverse().toArray();
       setAiAnalyses(allAiAnalyses);
       if (isAiAnalysisView) {
         if (selectedAiAnalysis) {
@@ -3047,10 +3335,58 @@ function App() {
             onChange={(event) => { updateNewDraft({ text: event.target.value }); resizeTextarea(event.currentTarget); }}
             disabled={composerDisabled}
           />
+          {enableVoiceInput ? (
+            <section className="voice-input-panel" aria-label="本文の音声入力">
+              <div className="voice-input-actions">
+                <button className="voice-input-start" type="button" onClick={requestVoiceInput} disabled={composerDisabled || Boolean(voiceDiagnostics && !voiceDiagnosticsReady)}>
+                  <Mic size={18} aria-hidden="true" /> 音声入力
+                </button>
+                <button className="voice-input-stop" type="button" onClick={() => stopVoiceInput()} disabled={!voiceIsActive}>
+                  <Square size={15} aria-hidden="true" /> 話し終わり
+                </button>
+              </div>
+              <p className="voice-input-status" role={voicePhase === "failed" || voicePhase === "unavailable" ? "alert" : "status"}>
+                {voiceMessage || "本文の末尾へ文字を追加します。音声入力を終えても、保存を押すまで正式な記録にはなりません。"}
+              </p>
+              {voicePhase === "ending" && voiceControlRef.current.transcript.unconfirmedResults().length ? <p className="voice-input-unconfirmed">一部に未確定の文字が含まれます。保存はできます。</p> : null}
+              <details className="voice-input-notice">
+                <summary>音声入力の通信について</summary>
+                <p>音声を文字に変換するため、ブラウザが音声認識サービスへ音声を送信する場合があります。通信が必要になる場合があります。Baseball Noteは音声ファイルを録音・保存せず、認識した文字を下書きや記録として保存します。</p>
+                <p>完全オフラインや、外部サービス側で音声が保存されないことは保証できません。</p>
+              </details>
+              {developmentVoiceInput ? (
+                <details className="voice-diagnostic-panel">
+                  <summary>開発用：{voiceDiagnosticPresentation.title}</summary>
+                  <p>認識した本文を含む通知列・条件・結果を、この開発版専用のブラウザ保存領域へ残します。通常の記録、AI用コピー、通常バックアップには入りません。外部への自動送信はしません。</p>
+                  {voiceDiagnosticPresentation.diagnostic ? (
+                    <>
+                      <p>対象の開始日時: {voiceDiagnosticPresentation.diagnostic.startedAt ?? voiceDiagnosticPresentation.diagnostic.createdAt} / 状態: {voiceDiagnosticPresentation.diagnostic.status}</p>
+                      {voiceDiagnosticPresentation.kind === "interrupted-previous" ? <p>中断直前の通知まで保存できた保証はありません。最後に保存できた時点: {voiceDiagnosticPresentation.diagnostic.savedAt ?? "不明"}</p> : null}
+                      <button type="button" onClick={() => copyVoiceDiagnostic(voiceDiagnosticPresentation.diagnostic!, voiceDiagnosticPresentation.title)}>{voiceDiagnosticPresentation.copyLabel}</button>
+                      <pre>{voiceDiagnosticPresentation.diagnostic.events.join("\n")}</pre>
+                    </>
+                  ) : <p>今回の診断はまだありません。前回の診断を今回のものとして表示・コピーしません。</p>}
+                </details>
+              ) : null}
+            </section>
+          ) : null}
           <button className="send-button" type="submit" disabled={!canSubmit}>
             {isSaving ? "保存中" : "保存"}
           </button>
         </form>
+        {isVoiceConsentOpen ? (
+          <div className="voice-consent-backdrop" role="presentation">
+            <section className="voice-consent-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-consent-title">
+              <h2 id="voice-consent-title">音声入力の前に確認</h2>
+              <p>音声を文字に変換するため、ブラウザが音声認識サービスへ音声を送信する場合があります。通信が必要になる場合があります。Baseball Noteは音声ファイルを録音・保存せず、認識した文字を下書きや記録として保存します。</p>
+              <p>この説明への同意は、このブラウザ内に説明文の版とともに記憶します。音声入力を使わない場合も、手入力と保存はそのまま使えます。</p>
+              <div className="voice-consent-actions">
+                <button type="button" onClick={acceptVoiceConsent}>同意して音声入力を使う</button>
+                <button type="button" onClick={() => { setIsVoiceConsentOpen(false); setVoicePhase("idle"); setVoiceMessage("音声入力は開始しませんでした。手入力を使えます。"); }}>使用しない</button>
+              </div>
+            </section>
+          </div>
+        ) : null}
         {wordHintScreen ? (
           <div className="word-hint-backdrop" role="presentation">
             <section className="word-hint-dialog" role="dialog" aria-modal="true" aria-labelledby="word-hint-title">

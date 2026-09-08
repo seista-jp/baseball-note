@@ -3194,6 +3194,26 @@ h1 {
 .composer .draft-status { order: 1; }
 .composer .composer-title { order: 1; }
 .composer .composer-message, .composer .attachment-preview { order: 4; }
+
+/* 開発版の通常記録画面にだけ出す、本文と同じ場所の音声入力。 */
+.voice-input-panel { order: 2; grid-column: 1 / -1; display: grid; gap: 8px; border: 1px solid #d8d6ce; border-radius: 10px; background: #fafaf7; padding: 10px; }
+.voice-input-actions, .voice-consent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.composer .voice-input-start, .composer .voice-input-stop { min-height: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.voice-input-start { border-color: #748557; background: #667a4f; color: #fff; }
+.voice-input-stop { border-color: #b8a49e; background: #fff; color: #6a4038; }
+.voice-input-status, .voice-input-unconfirmed, .voice-input-notice p, .voice-diagnostic-panel p { margin: 0; font-size: 13px; line-height: 1.55; }
+.voice-input-unconfirmed { border-left: 3px solid #b06a25; background: #fff7ec; color: #754418; padding: 7px 9px; }
+.voice-input-notice summary, .voice-diagnostic-panel summary { cursor: pointer; color: #52594a; font-size: 13px; font-weight: 700; }
+.voice-input-notice p { margin-top: 7px; color: #605f58; }
+.voice-diagnostic-panel { border-top: 1px solid #e1dfd7; padding-top: 8px; }
+.voice-diagnostic-panel button { min-height: 38px; margin-top: 8px; }
+.voice-diagnostic-panel pre { max-height: 150px; overflow: auto; margin: 8px 0 0; border: 1px solid #e1dfd7; border-radius: 6px; padding: 8px; background: #f5f5f1; white-space: pre-wrap; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.voice-consent-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: end center; padding: 16px; background: rgba(30, 30, 26, .48); }
+.voice-consent-dialog { width: min(620px, 100%); display: grid; gap: 13px; border-radius: 14px; background: #fff; padding: 20px; box-shadow: 0 16px 44px rgba(0,0,0,.25); }
+.voice-consent-dialog h2, .voice-consent-dialog p { margin: 0; }
+.voice-consent-dialog p { line-height: 1.6; }
+.voice-consent-actions button { flex: 1 1 180px; min-height: 46px; }
+.voice-consent-actions button:first-child { border-color: #748557; background: #667a4f; color: #fff; }
 .word-hint-entry { order: 2; justify-self: start; min-height: 40px; border: 1px solid #cfd2c7; border-radius: 8px; background: #f5f8ef; color: #3f4b2d; font-size: 13px; font-weight: 700; padding: 8px 11px; }
 .word-hint-entry:hover { background: #eaf0df; }
 .word-hint-summary { order: 2; display: grid; grid-column: 1 / -1; gap: 8px; max-width: 680px; border: 1px solid #d6dfc8; border-radius: 9px; background: #f7f9f2; padding: 10px; }
