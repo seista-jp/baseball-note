@@ -35,6 +35,7 @@ import { getDataWriteErrorMessage } from "./dataError";
 import { db, type BaseballDatabase } from "./db";
 import { ComposerDraft, hasDraftContent } from "./drafts";
 import { applyRecognitionEvent, RecognitionTranscriptState, type UnconfirmedRecognitionResult } from "./recognition-result-merge";
+import { createVoiceEventState, presentVoiceEventState, reduceVoiceEventState, type VoiceEventAction } from "./voice-event-status";
 import { createVoiceDiagnosticId, presentVoiceDiagnostic, type VoiceDiagnostic, type VoiceDiagnosticStore, type VoiceRecognitionNotification } from "./voiceDiagnostics";
 import {
   formatDateHeading,
@@ -879,6 +880,8 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
   selectedDateRef.current = selectedDate;
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voiceMessage, setVoiceMessage] = useState("");
+  const [voiceEventState, setVoiceEventState] = useState(createVoiceEventState);
+  const voiceEventPresentation = presentVoiceEventState(voiceEventState);
   const [isVoiceConsentOpen, setIsVoiceConsentOpen] = useState(false);
   const [latestVoiceDiagnostic, setLatestVoiceDiagnostic] = useState<VoiceDiagnostic | null>(null);
   const [interruptedVoiceDiagnostic, setInterruptedVoiceDiagnostic] = useState<VoiceDiagnostic | null>(null);
@@ -1094,6 +1097,10 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     control.events.push(`${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}.${String(elapsed % 1000).padStart(3, "0")} 音声入力: ${message}`);
   }
 
+  function updateVoiceEventDisplay(event: VoiceEventAction): void {
+    if (enableVoiceInput) setVoiceEventState((previous) => reduceVoiceEventState(previous, event));
+  }
+
   function persistVoiceText(): string {
     const control = voiceControlRef.current;
     const appended = control.transcript.text();
@@ -1144,6 +1151,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     persistVoiceText();
     addVoiceEvent(`${endReason}。${control.receivedFinalAfterStop ? "停止後の確定結果を受け取りました。" : ""}`);
     const diagnostic = buildVoiceDiagnostic(status, endReason);
+    updateVoiceEventDisplay({ type: "finish", session: control.id, hasText: Boolean(control.transcript.text().trim()), failed: status === "failed" || status === "unavailable" });
     setLatestVoiceDiagnostic(diagnostic);
     setInterruptedVoiceDiagnostic(null); setPreviousVoiceDiagnostic(null);
     if (voiceDiagnostics) void voiceDiagnostics.complete(diagnostic).catch(() => setVoiceMessage("診断を保存できませんでした。本文の下書きは残っています。"));
@@ -1156,6 +1164,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     const control = voiceControlRef.current;
     if (!control.active || control.stopping) return;
     control.stopping = true; if (control.restartId !== undefined) window.clearTimeout(control.restartId);
+    updateVoiceEventDisplay({ type: "stop", session: control.id });
     const retained = control.transcript.freezeInterimResults();
     persistVoiceText();
     addVoiceEvent(`${reason}。途中結果を${retained.length}件、未確定として保持しました。`);
@@ -1175,14 +1184,17 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     const recognizer = new Recognition();
     control.recognizer = recognizer; control.recognitionRun += 1;
     const run = control.recognitionRun;
+    updateVoiceEventDisplay({ type: "request", session: sessionId, run });
     recognizer.lang = "ja-JP"; recognizer.continuous = true; recognizer.interimResults = true;
     recognizer.onstart = () => {
       if (!control.active || control.id !== sessionId || control.stopping || control.recognizer !== recognizer) return;
-      setVoicePhase("listening"); setVoiceMessage("話してください。本文の末尾へ認識中の文字を追加しています。"); addVoiceEvent(`認識 #${run} を開始しました。`);
+      setVoicePhase("listening"); setVoiceMessage("認識結果が届くと、本文の末尾へ文字を追加します。"); addVoiceEvent(`認識 #${run} を開始しました。`);
+      updateVoiceEventDisplay({ type: "start", session: sessionId, run });
       saveVoiceDiagnosticProgress("認識開始通知を受けました。");
     };
     recognizer.onspeechstart = () => {
       if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      updateVoiceEventDisplay({ type: "speechstart", session: sessionId, run });
       if (control.nextSpeechStartsNewUtterance) beginNextVoiceUtterance("前の発話の終了後に、新しい発話開始通知を受けました。");
       control.nextSpeechStartsNewUtterance = false;
       addVoiceEvent(`認識 #${run}・発話 #${control.utteranceNumber} の開始通知を受けました。`);
@@ -1190,6 +1202,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     };
     recognizer.onspeechend = () => {
       if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
+      updateVoiceEventDisplay({ type: "speechend", session: sessionId, run });
       control.nextSpeechStartsNewUtterance = true;
       addVoiceEvent(`認識 #${run}・発話 #${control.utteranceNumber} の終了通知を受けました。`);
       saveVoiceDiagnosticProgress("発話終了通知を受けました。");
@@ -1217,6 +1230,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     recognizer.onerror = (event) => {
       if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
       if (control.stopping && event.error === "aborted") { addVoiceEvent("アプリが終了のため要求した中止通知を受けました。"); return; }
+      updateVoiceEventDisplay({ type: "error", session: sessionId, run, error: event.error });
       addVoiceEvent(`認識エラーを受けました — ${event.error}`);
       saveVoiceDiagnosticProgress(`認識エラーを受けました — ${event.error}`);
       if (event.error === "no-speech") return;
@@ -1227,6 +1241,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     recognizer.onend = () => {
       if (!control.active || control.id !== sessionId || control.recognizer !== recognizer) return;
       addVoiceEvent(`認識 #${run} の終了通知を受けました。`);
+      updateVoiceEventDisplay({ type: "end", session: sessionId, run });
       saveVoiceDiagnosticProgress("認識終了通知を受けました。");
       if (control.stopping) {
         setVoiceMessage("認識終了通知を受けました。停止後の確定結果を待っています。");
@@ -1242,6 +1257,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     try { recognizer.start(); addVoiceEvent(`${run === 1 ? "最初の" : "再開の"}認識開始を要求しました。`); saveVoiceDiagnosticProgress("認識開始を要求しました。"); }
     catch (error) {
       const name = error instanceof Error ? error.name : "RecognitionStartError";
+      updateVoiceEventDisplay({ type: "error", session: sessionId, run, error: name });
       addVoiceEvent(`認識開始に失敗しました — ${name}`); control.stopping = true; completeVoiceInput("failed", `認識開始失敗: ${name}`, "音声入力を開始できませんでした。本文は変更していません。");
     }
   }
@@ -1250,6 +1266,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
     const Recognition = getVoiceRecognitionConstructor();
     if (!window.isSecureContext || !Recognition) {
       const reason = !window.isSecureContext ? "安全な接続（HTTPS）が必要です" : "このブラウザは音声入力に対応していません";
+      updateVoiceEventDisplay({ type: "unavailable", detail: reason });
       setVoicePhase("unavailable"); setVoiceMessage(`${reason}。手入力はそのまま使えます。`); return;
     }
     if (!draftState.ready || draftState.busy || voiceControlRef.current.active) return;
@@ -3336,7 +3353,7 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
             disabled={composerDisabled}
           />
           {enableVoiceInput ? (
-            <section className="voice-input-panel" aria-label="本文の音声入力">
+            <section className="voice-input-panel voice-input-panel-status" aria-label="本文の音声入力">
               <div className="voice-input-actions">
                 <button className="voice-input-start" type="button" onClick={requestVoiceInput} disabled={composerDisabled || Boolean(voiceDiagnostics && !voiceDiagnosticsReady)}>
                   <Mic size={18} aria-hidden="true" /> 音声入力
@@ -3344,6 +3361,10 @@ function App({ database = db, enableVoiceInput = false, developmentVoiceInput = 
                 <button className="voice-input-stop" type="button" onClick={() => stopVoiceInput()} disabled={!voiceIsActive}>
                   <Square size={15} aria-hidden="true" /> 話し終わり
                 </button>
+              </div>
+              <div className="voice-event-status" role="status" aria-live="polite" aria-atomic="true" data-phase={voiceEventState.phase}>
+                <p className="voice-event-label">{voiceEventPresentation.label}</p>
+                <p className="voice-event-detail">{voiceEventPresentation.detail}</p>
               </div>
               <p className="voice-input-status" role={voicePhase === "failed" || voicePhase === "unavailable" ? "alert" : "status"}>
                 {voiceMessage || "本文の末尾へ文字を追加します。音声入力を終えても、保存を押すまで正式な記録にはなりません。"}

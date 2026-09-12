@@ -3201,6 +3201,11 @@ h1 {
 .composer .voice-input-start, .composer .voice-input-stop { min-height: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .voice-input-start { border-color: #748557; background: #667a4f; color: #fff; }
 .voice-input-stop { border-color: #b8a49e; background: #fff; color: #6a4038; }
+.voice-event-status { display: grid; gap: 3px; padding: 8px 10px; border: 1px solid #e1dfd9; border-radius: 6px; background: #fafaf8; color: #34363a; }
+.voice-event-status p { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.voice-event-label { min-height: 1.5em; font-size: 13px; font-weight: 600; }
+.voice-event-detail { min-height: 3em; font-size: 12px; color: #666661; }
+.voice-input-panel-status > .voice-input-status { min-height: 4.65em; }
 .voice-input-status, .voice-input-unconfirmed, .voice-input-notice p, .voice-diagnostic-panel p { margin: 0; font-size: 13px; line-height: 1.55; }
 .voice-input-unconfirmed { border-left: 3px solid #b06a25; background: #fff7ec; color: #754418; padding: 7px 9px; }
 .voice-input-notice summary, .voice-diagnostic-panel summary { cursor: pointer; color: #52594a; font-size: 13px; font-weight: 700; }
